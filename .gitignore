@@ -1,0 +1,12 @@
+.env
+__pycache__/
+*.py[cod]
+node_modules/
+.svelte-kit/
+.env.local
+.env.*.local
+dist/
+build/
+*.egg-info/
+.venv/
+venv/
