@@ -14,23 +14,50 @@ load_dotenv(_here.parent / "backend" / ".env")
 
 
 def calc_score(lead: dict) -> int:
+    # Keep in sync with backend/scoring.py — intentional duplicate (can't import backend here)
     score = 0
+
     if not lead.get("has_website"):
         if lead.get("website_inferred"):
             score += 20
         else:
             score += 40
+
     if lead.get("mobile_friendly") is False:
         score += 20
-    pagespeed = lead.get("pagespeed_mobile")
-    if pagespeed is not None and pagespeed < 50:
-        score += 15
+
+    pagespeed_mobile = lead.get("pagespeed_mobile")
+    if pagespeed_mobile is not None:
+        if pagespeed_mobile < 25:
+            score += 20
+        elif pagespeed_mobile < 50:
+            score += 15
+        elif pagespeed_mobile < 75:
+            score += 5
+
+    pagespeed_seo = lead.get("pagespeed_seo")
+    if pagespeed_seo is not None:
+        if pagespeed_seo < 50:
+            score += 10
+        elif pagespeed_seo < 80:
+            score += 5
+
+    pagespeed_bp = lead.get("pagespeed_best_practices")
+    if pagespeed_bp is not None:
+        if pagespeed_bp < 50:
+            score += 10
+        elif pagespeed_bp < 80:
+            score += 5
+
     if not lead.get("has_https"):
         score += 10
+
     if (lead.get("review_count") or 0) < 10:
         score += 10
-    if not lead.get("also_on_yelp") and lead.get("has_gbp"):
+
+    if lead.get("also_on_yelp") is False and lead.get("has_gbp"):
         score += 5
+
     return min(score, 100)
 
 

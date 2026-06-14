@@ -15,6 +15,7 @@ from auth import require_auth
 from db import supabase
 from limiter import limiter
 from models import Lead
+from scoring import calculate_score
 from utils import is_social_media_url, is_aggregator_url, SOCIAL_MEDIA_DOMAINS, AGGREGATOR_DOMAINS
 
 router = APIRouter(prefix="/leads", tags=["enrichment"])
@@ -32,35 +33,6 @@ _DIRECTORY_DOMAINS = {
     "google.com", "bbb.org", "foursquare.com", "mapquest.com",
     "whitepages.com", "angi.com", "houzz.com", "thumbtack.com",
 } | SOCIAL_MEDIA_DOMAINS | AGGREGATOR_DOMAINS
-
-
-def _calculate_score(data: dict) -> tuple[int, str]:
-    score = 0
-    if not data.get("has_website"):
-        if data.get("website_inferred"):
-            score += 20
-        else:
-            score += 40
-    if data.get("mobile_friendly") is False:
-        score += 20
-    pagespeed_mobile = data.get("pagespeed_mobile")
-    if pagespeed_mobile is not None and pagespeed_mobile < 50:
-        score += 15
-    if not data.get("has_https"):
-        score += 10
-    if (data.get("review_count") or 0) < 10:
-        score += 10
-    if data.get("also_on_yelp") is False:
-        score += 5
-
-    score = min(score, 100)
-    if score >= 60:
-        priority = "high"
-    elif score >= 30:
-        priority = "medium"
-    else:
-        priority = "low"
-    return score, priority
 
 
 async def _fetch_pagespeed(client: httpx.AsyncClient, url: str) -> dict:
@@ -332,7 +304,7 @@ async def enrich_lead(request: Request, lead_id: UUID):
         enrichment = await run_enrichment(client, lead)
 
     merged = {**lead, **enrichment}
-    score, priority = _calculate_score(merged)
+    score, priority = calculate_score(merged)
     enrichment["lead_score"] = score
     enrichment["priority"] = priority
     enrichment["last_updated"] = datetime.now(timezone.utc).isoformat()

@@ -46,6 +46,7 @@ client-liam-leadgen/
 │   │   ├── leads.py            # CRUD
 │   │   ├── scraper.py          # Places API + Yelp
 │   │   └── enrichment.py       # PageSpeed, cross-ref scoring
+│   ├── scoring.py              # unified lead scoring function
 │   ├── models.py               # Pydantic schemas
 │   ├── db.py                   # Supabase client
 │   └── requirements.txt
@@ -87,10 +88,17 @@ has_website         boolean
 has_https           boolean
 pagespeed_mobile    int            -- 0–100
 pagespeed_desktop   int            -- 0–100
+pagespeed_seo       int            -- 0–100
+pagespeed_best_practices int       -- 0–100
 mobile_friendly     boolean
+website_inferred    boolean        -- true if URL was discovered, not from GBP
+website_screenshot  text nullable  -- base64 data URI from PageSpeed API
+email               text nullable  -- extracted from homepage
 site_age_estimate   text           -- rough guess from headers/footer
 also_on_yelp        boolean
 yelp_url            text nullable
+latitude            float nullable
+longitude           float nullable
 lead_score          int            -- 0–100, higher = better prospect
 priority            text           -- 'high' | 'medium' | 'low'
 status              text           -- 'cold' | 'contacted' | 'proposal' | 'closed_won' | 'closed_lost'
@@ -103,21 +111,30 @@ last_updated        timestamptz
 
 ## Lead Scoring Logic
 
-Score is 0–100. Higher = more likely to convert.
+Score is 0–100, capped. Higher = more likely to convert. Single source of truth: `backend/scoring.py`.
 
 | Signal | Points |
 |---|---|
 | No website at all | +40 |
-| Website fails mobile | +20 |
-| PageSpeed mobile under 50 | +15 |
+| Website inferred (discovered, not from GBP) | +20 |
+| Website fails mobile (`mobile_friendly == False`) | +20 |
+| PageSpeed mobile 0–24 | +20 |
+| PageSpeed mobile 25–49 | +15 |
+| PageSpeed mobile 50–74 | +5 |
+| PageSpeed SEO < 50 | +10 |
+| PageSpeed SEO 50–79 | +5 |
+| PageSpeed best practices < 50 | +10 |
+| PageSpeed best practices 50–79 | +5 |
 | No HTTPS | +10 |
 | Review count under 10 | +10 |
-| Not on Yelp but business exists | +5 |
+| Not on Yelp (GBP confirmed) | +5 |
 
 Priority assignment:
 - Score 60+ → `high`
 - Score 30–59 → `medium`
 - Score under 30 → `low`
+
+Note: `scripts/score_leads.py` intentionally duplicates this logic (it cannot import from `backend/`). Keep the two in sync when changing scoring.
 
 ---
 
