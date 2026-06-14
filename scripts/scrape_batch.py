@@ -3,12 +3,15 @@
 import argparse
 import os
 import sys
+from pathlib import Path
 
 import httpx
 from dotenv import load_dotenv
 from supabase import create_client
 
-load_dotenv()
+_here = Path(__file__).parent
+load_dotenv(_here / ".env")
+load_dotenv(_here.parent / "backend" / ".env")
 
 
 def _lead_count(sb) -> int:
@@ -30,8 +33,12 @@ def main():
 
     supabase_url = os.getenv("SUPABASE_URL")
     supabase_key = os.getenv("SUPABASE_KEY")
+    script_token = os.getenv("SCRIPT_API_TOKEN")
     if not supabase_url or not supabase_key:
         print("ERROR: SUPABASE_URL and SUPABASE_KEY must be set in .env", file=sys.stderr)
+        sys.exit(1)
+    if not script_token:
+        print("ERROR: SCRIPT_API_TOKEN must be set in .env", file=sys.stderr)
         sys.exit(1)
 
     sb = create_client(supabase_url, supabase_key)
@@ -43,6 +50,7 @@ def main():
         resp = httpx.post(
             f"{args.api_url}/scrapes",
             json={"category": args.category, "city": args.city},
+            headers={"Authorization": f"Bearer {script_token}"},
             timeout=120,
         )
         resp.raise_for_status()

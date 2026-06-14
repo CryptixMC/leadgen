@@ -3,11 +3,14 @@
 import os
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 from dotenv import load_dotenv
 from supabase import create_client
 
-load_dotenv()
+_here = Path(__file__).parent
+load_dotenv(_here / ".env")
+load_dotenv(_here.parent / "backend" / ".env")
 
 
 def calc_score(lead: dict) -> int:
