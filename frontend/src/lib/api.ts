@@ -23,6 +23,8 @@ export interface Lead {
 	lead_score: number | null;
 	priority: string | null;
 	status: string;
+	latitude: number | null;
+	longitude: number | null;
 	notes: string | null;
 	created_at: string | null;
 	last_updated: string | null;
@@ -67,6 +69,17 @@ export async function updateLead(
 		body: JSON.stringify(data)
 	});
 	if (!res.ok) throw new Error(`Failed to update lead: ${res.statusText}`);
+	return res.json();
+}
+
+export async function geocodeMissing(
+	token?: string
+): Promise<{ geocoded: number; failed: number; skipped: number }> {
+	const res = await fetch(`${BASE}/leads/geocode-missing`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json', ...authHeaders(token) }
+	});
+	if (!res.ok) throw new Error(`Geocode failed: ${res.statusText}`);
 	return res.json();
 }
 

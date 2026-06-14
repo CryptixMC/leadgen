@@ -68,6 +68,8 @@ async def scrape(request: Request, payload: ScrapeRequest):
             has_website = bool(website)
             has_https = website.startswith("https://") if website else False
 
+            location = place.get("geometry", {}).get("location", {})
+
             now = datetime.now(timezone.utc).isoformat()
             lead = {
                 "business_name": detail.get("name") or place.get("name", ""),
@@ -80,6 +82,8 @@ async def scrape(request: Request, payload: ScrapeRequest):
                 "has_gbp": True,
                 "has_website": has_website,
                 "has_https": has_https,
+                "latitude": location.get("lat"),
+                "longitude": location.get("lng"),
                 "status": "cold",
                 "last_updated": now,
             }

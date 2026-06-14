@@ -26,6 +26,8 @@ class Lead(BaseModel):
     lead_score: Optional[int] = None
     priority: Optional[str] = None
     status: str = "cold"
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
     notes: Optional[str] = None
     created_at: Optional[datetime] = None
     last_updated: Optional[datetime] = None
@@ -45,4 +47,10 @@ class ScrapeResponse(BaseModel):
     upserted: int
     category: str
     city: str
+
+
+class GeocodeResponse(BaseModel):
+    geocoded: int
+    failed: int
+    skipped: int
 
