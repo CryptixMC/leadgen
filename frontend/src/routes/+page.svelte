@@ -2,7 +2,7 @@
 	import { invalidateAll } from '$app/navigation';
 	import type { PageData } from './$types';
 	import type { Lead } from '$lib/api';
-	import { batchDeleteLeads, getClientToken } from '$lib/api';
+	import { batchDeleteLeads, createLead, getClientToken } from '$lib/api';
 
 	let { data }: { data: PageData } = $props();
 
@@ -11,6 +11,55 @@
 	let sortAsc = $state(false);
 	let selected = $state(new Set<string>());
 	let deleting = $state(false);
+
+	let showCreateModal = $state(false);
+	let createLoading = $state(false);
+	let createError = $state('');
+	let createForm = $state({
+		business_name: '',
+		address: '',
+		phone: '',
+		website_url: '',
+		email: '',
+		google_rating: 0,
+		review_count: 0,
+		notes: ''
+	});
+
+	function openCreateModal() {
+		createForm = { business_name: '', address: '', phone: '', website_url: '', email: '', google_rating: 0, review_count: 0, notes: '' };
+		createError = '';
+		showCreateModal = true;
+	}
+
+	function closeCreateModal() {
+		showCreateModal = false;
+	}
+
+	async function handleCreateLead(e: Event) {
+		e.preventDefault();
+		createError = '';
+		createLoading = true;
+		try {
+			const payload: Record<string, unknown> = {
+				business_name: createForm.business_name.trim(),
+				address: createForm.address.trim(),
+				phone: createForm.phone.trim(),
+				google_rating: Number(createForm.google_rating) || 0,
+				review_count: Number(createForm.review_count) || 0
+			};
+			if (createForm.website_url.trim()) payload.website_url = createForm.website_url.trim();
+			if (createForm.email.trim()) payload.email = createForm.email.trim();
+			if (createForm.notes.trim()) payload.notes = createForm.notes.trim();
+			await createLead(payload, getClientToken());
+			showCreateModal = false;
+			await invalidateAll();
+		} catch (err) {
+			createError = err instanceof Error ? err.message : 'Failed to create lead';
+		} finally {
+			createLoading = false;
+		}
+	}
 
 	const STATUSES = ['', 'cold', 'contacted', 'proposal', 'closed_won', 'closed_lost'];
 	const PRIORITIES = ['', 'high', 'medium', 'low'];
@@ -119,6 +168,7 @@
 			<button class="sort-btn" onclick={() => (sortAsc = !sortAsc)}>
 				Score {sortAsc ? '↑' : '↓'}
 			</button>
+			<button class="new-lead-btn" onclick={openCreateModal}>+ New Lead</button>
 		</div>
 	</div>
 
@@ -207,6 +257,62 @@
 		</table>
 	</div>
 </main>
+
+{#if showCreateModal}
+	<div class="modal-backdrop" onclick={closeCreateModal} role="dialog" aria-modal="true">
+		<div class="modal" onclick={(e) => e.stopPropagation()}>
+			<div class="modal-header">
+				<h2>New Lead</h2>
+				<button class="modal-close" onclick={closeCreateModal} aria-label="Close">✕</button>
+			</div>
+			<form onsubmit={handleCreateLead}>
+				<div class="form-grid">
+					<label class="field">
+						<span>Business Name <span class="required">*</span></span>
+						<input type="text" bind:value={createForm.business_name} required placeholder="Acme Plumbing Co." />
+					</label>
+					<label class="field">
+						<span>Phone <span class="required">*</span></span>
+						<input type="text" bind:value={createForm.phone} required placeholder="(204) 555-0100" />
+					</label>
+					<label class="field field-full">
+						<span>Address <span class="required">*</span></span>
+						<input type="text" bind:value={createForm.address} required placeholder="123 Main St, Winnipeg, MB" />
+					</label>
+					<label class="field">
+						<span>Website URL</span>
+						<input type="url" bind:value={createForm.website_url} placeholder="https://example.com" />
+					</label>
+					<label class="field">
+						<span>Email</span>
+						<input type="email" bind:value={createForm.email} placeholder="owner@example.com" />
+					</label>
+					<label class="field">
+						<span>Google Rating</span>
+						<input type="number" bind:value={createForm.google_rating} min="0" max="5" step="0.1" placeholder="4.2" />
+					</label>
+					<label class="field">
+						<span>Review Count</span>
+						<input type="number" bind:value={createForm.review_count} min="0" placeholder="47" />
+					</label>
+					<label class="field field-full">
+						<span>Notes</span>
+						<textarea bind:value={createForm.notes} rows="3" placeholder="Anything worth noting…"></textarea>
+					</label>
+				</div>
+				{#if createError}
+					<p class="form-error">{createError}</p>
+				{/if}
+				<div class="modal-footer">
+					<button type="button" class="cancel-btn" onclick={closeCreateModal}>Cancel</button>
+					<button type="submit" class="submit-btn" disabled={createLoading}>
+						{createLoading ? 'Creating…' : 'Create Lead'}
+					</button>
+				</div>
+			</form>
+		</div>
+	</div>
+{/if}
 
 <style>
 	main {
@@ -517,5 +623,171 @@
 		text-align: center;
 		color: #4a5568;
 		padding: 3rem;
+	}
+
+	.new-lead-btn {
+		background: #7c3aed;
+		border: none;
+		color: #fff;
+		padding: 0.35rem 0.85rem;
+		border-radius: 6px;
+		cursor: pointer;
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 0.8rem;
+		font-weight: 600;
+		transition: background 0.15s;
+	}
+
+	.new-lead-btn:hover {
+		background: #6d28d9;
+	}
+
+	/* Modal */
+	.modal-backdrop {
+		position: fixed;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.65);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 100;
+		padding: 1rem;
+	}
+
+	.modal {
+		background: #10101a;
+		border: 1px solid #2a2a3e;
+		border-radius: 12px;
+		width: 100%;
+		max-width: 560px;
+		max-height: 90vh;
+		overflow-y: auto;
+		padding: 1.5rem;
+	}
+
+	.modal-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 1.25rem;
+	}
+
+	.modal-header h2 {
+		font-size: 1.1rem;
+		color: #f1f5f9;
+		margin: 0;
+	}
+
+	.modal-close {
+		background: transparent;
+		border: none;
+		color: #64748b;
+		font-size: 1rem;
+		cursor: pointer;
+		padding: 0.2rem 0.4rem;
+		border-radius: 4px;
+		transition: color 0.15s;
+	}
+
+	.modal-close:hover {
+		color: #f1f5f9;
+	}
+
+	.form-grid {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 0.85rem;
+	}
+
+	.field {
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+		font-size: 0.8rem;
+		color: #94a3b8;
+	}
+
+	.field-full {
+		grid-column: 1 / -1;
+	}
+
+	.field input,
+	.field textarea {
+		background: #13131f;
+		border: 1px solid #2a2a3e;
+		color: #e2e8f0;
+		padding: 0.4rem 0.6rem;
+		border-radius: 6px;
+		font-size: 0.85rem;
+		font-family: inherit;
+		outline: none;
+		transition: border-color 0.15s;
+	}
+
+	.field input:focus,
+	.field textarea:focus {
+		border-color: #7c3aed;
+	}
+
+	.field textarea {
+		resize: vertical;
+	}
+
+	.required {
+		color: #f87171;
+	}
+
+	.form-error {
+		margin-top: 0.75rem;
+		color: #f87171;
+		font-size: 0.82rem;
+		background: #2a1a1a;
+		border: 1px solid #7f1d1d;
+		border-radius: 6px;
+		padding: 0.5rem 0.75rem;
+	}
+
+	.modal-footer {
+		display: flex;
+		justify-content: flex-end;
+		gap: 0.6rem;
+		margin-top: 1.25rem;
+	}
+
+	.cancel-btn {
+		background: transparent;
+		border: 1px solid #2a2a3e;
+		color: #94a3b8;
+		padding: 0.4rem 0.9rem;
+		border-radius: 6px;
+		cursor: pointer;
+		font-size: 0.85rem;
+		transition: border-color 0.15s, color 0.15s;
+	}
+
+	.cancel-btn:hover {
+		border-color: #64748b;
+		color: #e2e8f0;
+	}
+
+	.submit-btn {
+		background: #7c3aed;
+		border: none;
+		color: #fff;
+		padding: 0.4rem 1rem;
+		border-radius: 6px;
+		cursor: pointer;
+		font-size: 0.85rem;
+		font-weight: 600;
+		transition: background 0.15s;
+	}
+
+	.submit-btn:hover:not(:disabled) {
+		background: #6d28d9;
+	}
+
+	.submit-btn:disabled {
+		opacity: 0.55;
+		cursor: not-allowed;
 	}
 </style>
