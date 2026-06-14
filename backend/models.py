@@ -38,6 +38,17 @@ class Lead(BaseModel):
     last_updated: Optional[datetime] = None
 
 
+class LeadCreate(BaseModel):
+    business_name: str
+    address: str
+    phone: str
+    website_url: Optional[str] = None
+    email: Optional[str] = None
+    google_rating: float = 0.0
+    review_count: int = 0
+    notes: Optional[str] = None
+
+
 class LeadUpdate(BaseModel):
     status: Optional[str] = None
     notes: Optional[str] = None

@@ -3,7 +3,7 @@ import os
 import httpx
 from datetime import datetime, timezone
 from typing import Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from auth import require_auth
 from db import supabase
 from limiter import limiter
-from models import Lead, LeadUpdate, GeocodeResponse, RescoreResponse, BatchDeleteRequest
+from models import Lead, LeadCreate, LeadUpdate, GeocodeResponse, RescoreResponse, BatchDeleteRequest
 from routers.enrichment import run_enrichment
 
 router = APIRouter(prefix="/leads", tags=["leads"])
@@ -128,6 +128,32 @@ async def rescore_all_leads(request: Request):
             supabase.table("leads").update(enrichment).eq("id", lead["id"]).execute()
             updated += 1
     return RescoreResponse(updated=updated, total=len(leads))
+
+
+@router.post("", response_model=Lead, dependencies=[Depends(require_auth)])
+async def create_lead(payload: LeadCreate):
+    now = datetime.now(timezone.utc).isoformat()
+    has_website = bool(payload.website_url)
+    has_https = payload.website_url.startswith("https://") if has_website else False
+
+    lead = {
+        **payload.model_dump(),
+        "google_place_id": f"manual_{uuid4()}",
+        "has_website": has_website,
+        "has_https": has_https,
+        "has_gbp": False,
+        "status": "cold",
+        "created_at": now,
+        "last_updated": now,
+    }
+    score, priority = _batch_score(lead)
+    lead["lead_score"] = score
+    lead["priority"] = priority
+
+    result = supabase.table("leads").insert(lead).execute()
+    if not result.data:
+        raise HTTPException(status_code=500, detail="Insert failed")
+    return result.data[0]
 
 
 @router.get("", response_model=list[Lead], dependencies=[Depends(require_auth)])

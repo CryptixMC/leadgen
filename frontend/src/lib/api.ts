@@ -135,6 +135,19 @@ export async function batchDeleteLeads(
 	return res.json();
 }
 
+export async function createLead(
+	payload: Record<string, unknown>,
+	token?: string
+): Promise<Lead> {
+	const res = await fetch(`${BASE}/leads`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
+		body: JSON.stringify(payload)
+	});
+	if (!res.ok) throw new Error(`Failed to create lead: ${res.statusText}`);
+	return res.json();
+}
+
 export async function triggerScrape(
 	category: string,
 	city: string,
