@@ -20,6 +20,11 @@ export interface Lead {
 	site_age_estimate: string | null;
 	also_on_yelp: boolean | null;
 	yelp_url: string | null;
+	email: string | null;
+	website_inferred: boolean | null;
+	website_screenshot: string | null;
+	pagespeed_seo: number | null;
+	pagespeed_best_practices: number | null;
 	lead_score: number | null;
 	priority: string | null;
 	status: string;
@@ -33,6 +38,12 @@ export interface Lead {
 function authHeaders(token?: string): Record<string, string> {
 	if (!token) return {};
 	return { Authorization: `Bearer ${token}` };
+}
+
+export function getClientToken(): string | undefined {
+	if (typeof document === 'undefined') return undefined;
+	const match = document.cookie.match(/(?:^|;\s*)sb_access_token=([^;]+)/);
+	return match ? decodeURIComponent(match[1]) : undefined;
 }
 
 export async function fetchLeads(
@@ -102,6 +113,15 @@ export async function deleteLead(id: string, token?: string): Promise<void> {
 	if (!res.ok) throw new Error(`Failed to delete lead: ${res.statusText}`);
 }
 
+export async function enrichLead(id: string, token?: string): Promise<Lead> {
+	const res = await fetch(`${BASE}/leads/${id}/enrich`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json', ...authHeaders(token) }
+	});
+	if (!res.ok) throw new Error(`Enrich failed: ${res.statusText}`);
+	return res.json();
+}
+
 export async function batchDeleteLeads(
 	ids: string[],
 	token?: string
@@ -118,12 +138,13 @@ export async function batchDeleteLeads(
 export async function triggerScrape(
 	category: string,
 	city: string,
+	target: number,
 	token?: string
-): Promise<{ upserted: number; category: string; city: string }> {
+): Promise<{ upserted: number; category: string; city: string; pages_fetched: number }> {
 	const res = await fetch(`${BASE}/scrapes`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
-		body: JSON.stringify({ category, city })
+		body: JSON.stringify({ category, city, target })
 	});
 	if (!res.ok) throw new Error(`Scrape failed: ${res.statusText}`);
 	return res.json();

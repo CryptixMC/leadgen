@@ -23,6 +23,11 @@ class Lead(BaseModel):
     site_age_estimate: Optional[str] = None
     also_on_yelp: Optional[bool] = None
     yelp_url: Optional[str] = None
+    email: Optional[str] = None
+    website_inferred: Optional[bool] = None
+    website_screenshot: Optional[str] = None
+    pagespeed_seo: Optional[int] = None
+    pagespeed_best_practices: Optional[int] = None
     lead_score: Optional[int] = None
     priority: Optional[str] = None
     status: str = "cold"
@@ -41,12 +46,14 @@ class LeadUpdate(BaseModel):
 class ScrapeRequest(BaseModel):
     category: str
     city: str
+    target: int = 60
 
 
 class ScrapeResponse(BaseModel):
     upserted: int
     category: str
     city: str
+    pages_fetched: int
 
 
 class GeocodeResponse(BaseModel):

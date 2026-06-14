@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { supabase } from '$lib/supabase';
-	import { fetchLeads, geocodeMissing, type Lead } from '$lib/api';
+	import { fetchLeads, geocodeMissing, getClientToken, type Lead } from '$lib/api';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -90,11 +89,8 @@
 		geocoding = true;
 		geocodeResult = null;
 		try {
-			const {
-				data: { session }
-			} = await supabase.auth.getSession();
-			geocodeResult = await geocodeMissing(session?.access_token ?? undefined);
-			leads = await fetchLeads({}, fetch, session?.access_token ?? undefined);
+			geocodeResult = await geocodeMissing(getClientToken());
+			leads = await fetchLeads({}, fetch, getClientToken());
 		} finally {
 			geocoding = false;
 		}

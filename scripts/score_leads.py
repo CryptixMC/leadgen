@@ -16,7 +16,10 @@ load_dotenv(_here.parent / "backend" / ".env")
 def calc_score(lead: dict) -> int:
     score = 0
     if not lead.get("has_website"):
-        score += 40
+        if lead.get("website_inferred"):
+            score += 20
+        else:
+            score += 40
     if lead.get("mobile_friendly") is False:
         score += 20
     pagespeed = lead.get("pagespeed_mobile")

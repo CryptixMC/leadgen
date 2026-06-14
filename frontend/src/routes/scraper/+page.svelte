@@ -1,11 +1,11 @@
 <script lang="ts">
-	import { triggerScrape, rescoreLeads } from '$lib/api';
-	import { supabase } from '$lib/supabase.js';
+	import { triggerScrape, rescoreLeads, getClientToken } from '$lib/api';
 
 	let category = $state('');
 	let city = $state('Winnipeg MB');
+	let target = $state(60);
 	let loading = $state(false);
-	let result = $state<{ upserted: number; category: string; city: string } | null>(null);
+	let result = $state<{ upserted: number; category: string; city: string; pages_fetched: number } | null>(null);
 	let error = $state('');
 
 	let rescoreLoading = $state(false);
@@ -17,8 +17,7 @@
 		rescoreError = '';
 		rescoreResult = null;
 		try {
-			const { data: { session } } = await supabase.auth.getSession();
-			rescoreResult = await rescoreLeads(session?.access_token);
+			rescoreResult = await rescoreLeads(getClientToken());
 		} catch (err) {
 			rescoreError = err instanceof Error ? err.message : 'Rescore failed';
 		} finally {
@@ -35,8 +34,7 @@
 		result = null;
 
 		try {
-			const { data: { session } } = await supabase.auth.getSession();
-			result = await triggerScrape(category.trim(), city.trim(), session?.access_token);
+			result = await triggerScrape(category.trim(), city.trim(), target, getClientToken());
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Scrape failed';
 		} finally {
@@ -78,6 +76,19 @@
 			/>
 		</div>
 
+		<div class="field">
+			<label for="target">Target leads</label>
+			<input
+				id="target"
+				type="number"
+				bind:value={target}
+				min="1"
+				max="300"
+				required
+				disabled={loading}
+			/>
+		</div>
+
 		<button type="submit" class="submit-btn" disabled={loading || !category.trim()}>
 			{loading ? 'Scraping…' : 'Run Scrape'}
 		</button>
@@ -86,7 +97,7 @@
 	{#if loading}
 		<div class="status-card info">
 			<span class="spinner"></span>
-			Calling Google Places API for <strong>{category}</strong> in <strong>{city}</strong>…
+			Scraping up to <strong>{target}</strong> leads for <strong>{category}</strong> in <strong>{city}</strong>…
 		</div>
 	{/if}
 
@@ -97,7 +108,7 @@
 				<span>leads processed</span>
 			</div>
 			<p class="result-detail">
-				Category: <strong>{result.category}</strong> · City: <strong>{result.city}</strong>
+				Category: <strong>{result.category}</strong> · City: <strong>{result.city}</strong> · Pages fetched: <strong>{result.pages_fetched}</strong>
 			</p>
 			<a href="/" class="view-link">View leads →</a>
 		</div>
@@ -109,19 +120,19 @@
 
 	<div class="section-divider"></div>
 
-	<h2 class="section-title">Rescore Leads</h2>
-	<p class="subtitle">Recalculates lead score and priority for every lead in the database.</p>
+	<h2 class="section-title">Enrich &amp; Rescore Leads</h2>
+	<p class="subtitle">Discovers websites and emails, then recalculates lead score and priority for every lead. May take several minutes.</p>
 
 	<div class="card">
 		<button class="submit-btn" onclick={handleRescore} disabled={rescoreLoading}>
-			{rescoreLoading ? 'Rescoring…' : 'Rescore All Leads'}
+			{rescoreLoading ? 'Enriching & rescoring…' : 'Enrich & Rescore All Leads'}
 		</button>
 	</div>
 
 	{#if rescoreLoading}
 		<div class="status-card info">
 			<span class="spinner"></span>
-			Recalculating scores for all leads…
+			Discovering websites, scraping emails, and recalculating scores for all leads…
 		</div>
 	{/if}
 

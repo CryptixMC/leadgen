@@ -23,7 +23,7 @@ def main():
     parser = argparse.ArgumentParser(description="Batch scrape leads via the backend API")
     parser.add_argument("--category", required=True, help="Business category (e.g. restaurant)")
     parser.add_argument("--city", required=True, help="City (e.g. 'Winnipeg MB')")
-    parser.add_argument("--limit", type=int, default=20, help="Max leads to process per call (advisory)")
+    parser.add_argument("--limit", type=int, default=60, help="Target number of leads to scrape (keeps paginating until reached or exhausted)")
     parser.add_argument(
         "--api-url",
         default=os.getenv("API_URL", "http://localhost:8000"),
@@ -44,14 +44,14 @@ def main():
     sb = create_client(supabase_url, supabase_key)
 
     before = _lead_count(sb)
-    print(f"Scraping: category={args.category!r}  city={args.city!r}  limit={args.limit}")
+    print(f"Scraping: category={args.category!r}  city={args.city!r}  target={args.limit}")
 
     try:
         resp = httpx.post(
             f"{args.api_url}/scrapes",
-            json={"category": args.category, "city": args.city},
+            json={"category": args.category, "city": args.city, "target": args.limit},
             headers={"Authorization": f"Bearer {script_token}"},
-            timeout=120,
+            timeout=300,
         )
         resp.raise_for_status()
     except httpx.HTTPError as exc:

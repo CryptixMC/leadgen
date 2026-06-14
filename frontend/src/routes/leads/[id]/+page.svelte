@@ -1,8 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import type { PageData } from './$types';
-	import { updateLead, deleteLead, type Lead } from '$lib/api';
-	import { supabase } from '$lib/supabase.js';
+	import { updateLead, deleteLead, enrichLead, getClientToken, type Lead } from '$lib/api';
 	import { goto } from '$app/navigation';
 
 	let { data }: { data: PageData } = $props();
@@ -13,19 +12,16 @@
 	let saveMsg = $state('');
 	let confirmDelete = $state(false);
 	let deleting = $state(false);
+	let enriching = $state(false);
+	let enrichMsg = $state('');
 
 	const STATUSES = ['cold', 'contacted', 'proposal', 'closed_won', 'closed_lost'];
-
-	async function getToken(): Promise<string | undefined> {
-		const { data: { session } } = await supabase.auth.getSession();
-		return session?.access_token;
-	}
 
 	async function changeStatus(e: Event) {
 		const select = e.target as HTMLSelectElement;
 		const newStatus = select.value;
 		try {
-			lead = await updateLead(lead.id, { status: newStatus }, await getToken());
+			lead = await updateLead(lead.id, { status: newStatus }, getClientToken());
 			saveMsg = 'Status saved.';
 		} catch {
 			saveMsg = 'Failed to save status.';
@@ -36,7 +32,7 @@
 	async function saveNotes() {
 		saving = true;
 		try {
-			lead = await updateLead(lead.id, { notes }, await getToken());
+			lead = await updateLead(lead.id, { notes }, getClientToken());
 			saveMsg = 'Notes saved.';
 		} catch {
 			saveMsg = 'Failed to save notes.';
@@ -52,6 +48,20 @@
 		return String(val);
 	}
 
+	async function handleEnrich() {
+		enriching = true;
+		enrichMsg = '';
+		try {
+			lead = await enrichLead(lead.id, getClientToken());
+			enrichMsg = 'Enriched!';
+		} catch {
+			enrichMsg = 'Enrichment failed.';
+		} finally {
+			enriching = false;
+		}
+		setTimeout(() => (enrichMsg = ''), 3000);
+	}
+
 	async function handleDelete() {
 		if (!confirmDelete) {
 			confirmDelete = true;
@@ -59,7 +69,7 @@
 		}
 		deleting = true;
 		try {
-			await deleteLead(lead.id, await getToken());
+			await deleteLead(lead.id, getClientToken());
 			goto('/');
 		} catch {
 			saveMsg = 'Failed to delete lead.';
@@ -75,6 +85,13 @@
 		if (s >= 30) return '#818cf8';
 		return '#64748b';
 	}
+
+	function psColor(s: number | null) {
+		if (s === null) return '#64748b';
+		if (s >= 70) return '#4ade80';
+		if (s >= 50) return '#facc15';
+		return '#f87171';
+	}
 </script>
 
 <svelte:head>
@@ -84,14 +101,20 @@
 <main>
 	<div class="back-row">
 		<button class="back-btn" onclick={() => goto('/')}>← Back</button>
-		<button
-			class="delete-btn"
-			class:confirm={confirmDelete}
-			onclick={handleDelete}
-			disabled={deleting}
-		>
-			{deleting ? 'Deleting…' : confirmDelete ? 'Confirm delete?' : 'Delete lead'}
-		</button>
+		<div class="back-actions">
+			{#if enrichMsg}<span class="save-msg">{enrichMsg}</span>{/if}
+			<button class="enrich-btn" onclick={handleEnrich} disabled={enriching}>
+				{enriching ? 'Enriching… (30s)' : 'Enrich Lead'}
+			</button>
+			<button
+				class="delete-btn"
+				class:confirm={confirmDelete}
+				onclick={handleDelete}
+				disabled={deleting}
+			>
+				{deleting ? 'Deleting…' : confirmDelete ? 'Confirm delete?' : 'Delete lead'}
+			</button>
+		</div>
 	</div>
 
 	<div class="lead-header">
@@ -123,20 +146,36 @@
 			<dl>
 				<dt>Phone</dt>
 				<dd>{fmt(lead.phone)}</dd>
+				{#if lead.email}
+					<dt>Email</dt>
+					<dd><a href={`mailto:${lead.email}`} class="contact-link">{lead.email}</a></dd>
+				{/if}
 				<dt>Website</dt>
 				<dd>
 					{#if lead.website_url}
-						<a href={lead.website_url} target="_blank" rel="noopener noreferrer">
+						<a href={lead.website_url} target="_blank" rel="noopener noreferrer" class="contact-link">
 							{lead.website_url}
 						</a>
+						{#if lead.website_inferred}
+							<span class="inferred-warn">Not on Google profile — may be inaccurate</span>
+						{/if}
 					{:else}
 						—
 					{/if}
 				</dd>
+				<dt>Google Maps</dt>
+				<dd>
+					<a
+						href={`https://www.google.com/maps/place/?q=place_id:${lead.google_place_id}`}
+						target="_blank"
+						rel="noopener noreferrer"
+						class="contact-link"
+					>View on Google Maps →</a>
+				</dd>
 				{#if lead.yelp_url}
 					<dt>Yelp</dt>
 					<dd>
-						<a href={lead.yelp_url} target="_blank" rel="noopener noreferrer">View on Yelp</a>
+						<a href={lead.yelp_url} target="_blank" rel="noopener noreferrer" class="contact-link">View on Yelp</a>
 					</dd>
 				{/if}
 			</dl>
@@ -158,17 +197,34 @@
 		<!-- Web Health -->
 		<section class="card">
 			<h2>Web Health</h2>
+			{#if lead.website_screenshot}
+				<img src={lead.website_screenshot} alt="Website screenshot" class="screenshot-thumb" />
+			{/if}
 			<dl>
 				<dt>Has Website</dt>
 				<dd>{fmt(lead.has_website)}</dd>
 				<dt>HTTPS</dt>
 				<dd>{fmt(lead.has_https)}</dd>
 				<dt>Mobile Friendly</dt>
-				<dd>{fmt(lead.mobile_friendly)}</dd>
+				<dd class:yes={lead.mobile_friendly === true} class:no={lead.mobile_friendly === false}>
+					{lead.mobile_friendly === true ? 'Yes' : lead.mobile_friendly === false ? 'No' : '—'}
+				</dd>
 				<dt>PageSpeed Mobile</dt>
-				<dd>{fmt(lead.pagespeed_mobile)}</dd>
+				<dd style="color: {psColor(lead.pagespeed_mobile)}">
+					{lead.pagespeed_mobile ?? '—'}
+				</dd>
 				<dt>PageSpeed Desktop</dt>
-				<dd>{fmt(lead.pagespeed_desktop)}</dd>
+				<dd style="color: {psColor(lead.pagespeed_desktop)}">
+					{lead.pagespeed_desktop ?? '—'}
+				</dd>
+				<dt>SEO Score</dt>
+				<dd style="color: {psColor(lead.pagespeed_seo)}">
+					{lead.pagespeed_seo ?? '—'}
+				</dd>
+				<dt>Best Practices</dt>
+				<dd style="color: {psColor(lead.pagespeed_best_practices)}">
+					{lead.pagespeed_best_practices ?? '—'}
+				</dd>
 				<dt>Site Age Estimate</dt>
 				<dd>{fmt(lead.site_age_estimate)}</dd>
 				<dt>Also on Yelp</dt>
@@ -384,6 +440,33 @@
 		margin-bottom: 0.5rem;
 	}
 
+	.back-actions {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.enrich-btn {
+		background: #7c3aed;
+		border: none;
+		color: #fff;
+		padding: 0.35rem 0.85rem;
+		border-radius: 6px;
+		cursor: pointer;
+		font-size: 0.8rem;
+		font-weight: 500;
+		transition: background 0.15s;
+	}
+
+	.enrich-btn:hover:not(:disabled) {
+		background: #6d28d9;
+	}
+
+	.enrich-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
 	.delete-btn {
 		background: transparent;
 		border: 1px solid #3d1a1a;
@@ -409,5 +492,41 @@
 	.delete-btn:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
+	}
+
+	.screenshot-thumb {
+		width: 100%;
+		border-radius: 6px;
+		margin-bottom: 1rem;
+		border: 1px solid #2a2a3e;
+		display: block;
+	}
+
+	.yes {
+		color: #4ade80;
+	}
+
+	.no {
+		color: #f87171;
+	}
+
+	.contact-link {
+		color: #7c3aed;
+		word-break: break-all;
+	}
+
+	.contact-link:hover {
+		color: #d946ef;
+	}
+
+	.inferred-warn {
+		display: block;
+		margin-top: 0.25rem;
+		font-size: 0.75rem;
+		color: #fbbf24;
+		background: #78350f22;
+		border: 1px solid #78350f;
+		border-radius: 4px;
+		padding: 0.2rem 0.5rem;
 	}
 </style>

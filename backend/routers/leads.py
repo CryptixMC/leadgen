@@ -12,6 +12,7 @@ from auth import require_auth
 from db import supabase
 from limiter import limiter
 from models import Lead, LeadUpdate, GeocodeResponse, RescoreResponse, BatchDeleteRequest
+from routers.enrichment import run_enrichment
 
 router = APIRouter(prefix="/leads", tags=["leads"])
 
@@ -19,7 +20,10 @@ router = APIRouter(prefix="/leads", tags=["leads"])
 def _batch_score(lead: dict) -> tuple[int, str]:
     score = 0
     if not lead.get("has_website"):
-        score += 40
+        if lead.get("website_inferred"):
+            score += 20
+        else:
+            score += 40
     if lead.get("mobile_friendly") is False:
         score += 20
     ps = lead.get("pagespeed_mobile")
@@ -37,10 +41,10 @@ def _batch_score(lead: dict) -> tuple[int, str]:
 
 
 TSV_COLUMNS = [
-    "id", "business_name", "address", "phone", "website_url",
+    "id", "business_name", "address", "phone", "website_url", "email",
     "google_place_id", "google_rating", "review_count", "has_gbp",
-    "has_website", "has_https", "pagespeed_mobile", "pagespeed_desktop",
-    "mobile_friendly", "site_age_estimate", "also_on_yelp", "yelp_url",
+    "has_website", "has_https", "website_inferred", "pagespeed_mobile", "pagespeed_desktop",
+    "mobile_friendly", "pagespeed_seo", "pagespeed_best_practices", "site_age_estimate", "also_on_yelp", "yelp_url",
     "lead_score", "priority", "status", "notes", "created_at", "last_updated",
 ]
 
@@ -108,19 +112,21 @@ async def geocode_missing(request: Request):
 
 
 @router.post("/rescore", response_model=RescoreResponse, dependencies=[Depends(require_auth)])
-@limiter.limit("5/minute")
+@limiter.limit("2/minute")
 async def rescore_all_leads(request: Request):
     leads = (supabase.table("leads").select("*").execute()).data or []
     now = datetime.now(timezone.utc).isoformat()
     updated = 0
-    for lead in leads:
-        score, priority = _batch_score(lead)
-        if lead.get("lead_score") == score and lead.get("priority") == priority:
-            continue
-        supabase.table("leads").update(
-            {"lead_score": score, "priority": priority, "last_updated": now}
-        ).eq("id", lead["id"]).execute()
-        updated += 1
+    async with httpx.AsyncClient() as client:
+        for lead in leads:
+            enrichment = await run_enrichment(client, lead)
+            merged = {**lead, **enrichment}
+            score, priority = _batch_score(merged)
+            enrichment["lead_score"] = score
+            enrichment["priority"] = priority
+            enrichment["last_updated"] = now
+            supabase.table("leads").update(enrichment).eq("id", lead["id"]).execute()
+            updated += 1
     return RescoreResponse(updated=updated, total=len(leads))
 
 

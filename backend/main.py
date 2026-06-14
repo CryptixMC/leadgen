@@ -16,9 +16,13 @@ app = FastAPI(title="Lead Generator API")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+_frontend_url = os.getenv("FRONTEND_URL", "")
+_allowed_origins = [o for o in [_frontend_url] if o]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[os.getenv("FRONTEND_URL", "")],
+    allow_origins=_allowed_origins,
+    allow_origin_regex=r"http://localhost:\d+",
     allow_credentials=False,
     allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],

@@ -2,8 +2,7 @@
 	import { invalidateAll } from '$app/navigation';
 	import type { PageData } from './$types';
 	import type { Lead } from '$lib/api';
-	import { batchDeleteLeads } from '$lib/api';
-	import { supabase } from '$lib/supabase.js';
+	import { batchDeleteLeads, getClientToken } from '$lib/api';
 
 	let { data }: { data: PageData } = $props();
 
@@ -57,8 +56,7 @@
 		if (!confirm(`Delete ${selected.size} lead${selected.size === 1 ? '' : 's'}? This cannot be undone.`)) return;
 		deleting = true;
 		try {
-			const { data: { session } } = await supabase.auth.getSession();
-			await batchDeleteLeads([...selected], session?.access_token);
+			await batchDeleteLeads([...selected], getClientToken());
 			selected = new Set();
 			await invalidateAll();
 		} catch (err) {
@@ -139,6 +137,7 @@
 					<th>Business</th>
 					<th>Address</th>
 					<th>Website</th>
+					<th>Email</th>
 					<th class="num" onclick={() => (sortAsc = !sortAsc)}>Score</th>
 					<th>Priority</th>
 					<th>Status</th>
@@ -153,7 +152,17 @@
 						<td class="check-col" onclick={(e) => toggleSelect(lead.id, e)}>
 							<input type="checkbox" checked={selected.has(lead.id)} onclick={(e) => e.stopPropagation()} />
 						</td>
-						<td class="name">{lead.business_name}</td>
+						<td class="name">
+							{lead.business_name}
+							<a
+								href={`https://www.google.com/maps/place/?q=place_id:${lead.google_place_id}`}
+								target="_blank"
+								rel="noopener noreferrer"
+								onclick={(e) => e.stopPropagation()}
+								class="maps-link"
+								title="View on Google Maps"
+							>Maps</a>
+						</td>
 						<td class="addr">{lead.address}</td>
 						<td>
 							{#if lead.website_url}
@@ -166,6 +175,20 @@
 								>
 									{new URL(lead.website_url).hostname}
 								</a>
+								{#if lead.website_inferred}
+									<span class="inferred-badge" title="Found via web search — not listed on Google profile">!</span>
+								{/if}
+							{:else}
+								<span class="none">—</span>
+							{/if}
+						</td>
+						<td>
+							{#if lead.email}
+								<a
+									href={`mailto:${lead.email}`}
+									onclick={(e) => e.stopPropagation()}
+									class="email-link"
+								>{lead.email}</a>
 							{:else}
 								<span class="none">—</span>
 							{/if}
@@ -177,7 +200,7 @@
 				{/each}
 				{#if filtered.length === 0}
 					<tr>
-						<td colspan="7" class="empty">No leads match your filters.</td>
+						<td colspan="8" class="empty">No leads match your filters.</td>
 					</tr>
 				{/if}
 			</tbody>
@@ -375,6 +398,20 @@
 		text-overflow: ellipsis;
 	}
 
+	.maps-link {
+		margin-left: 0.4rem;
+		font-size: 0.7rem;
+		color: #4a90d9;
+		text-decoration: none;
+		opacity: 0.7;
+		transition: opacity 0.15s;
+	}
+
+	.maps-link:hover {
+		opacity: 1;
+		color: #60b4ff;
+	}
+
 	.site-link {
 		color: #7c3aed;
 		font-size: 0.8rem;
@@ -382,6 +419,32 @@
 
 	.site-link:hover {
 		color: #d946ef;
+	}
+
+	.inferred-badge {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 14px;
+		height: 14px;
+		border-radius: 50%;
+		background: #78350f;
+		color: #fbbf24;
+		font-size: 0.65rem;
+		font-weight: 700;
+		margin-left: 0.3rem;
+		cursor: default;
+		vertical-align: middle;
+	}
+
+	.email-link {
+		color: #64a8a8;
+		font-size: 0.78rem;
+		text-decoration: none;
+	}
+
+	.email-link:hover {
+		color: #7ee8e8;
 	}
 
 	.none {
