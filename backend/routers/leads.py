@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from auth import require_auth
 from db import supabase
 from limiter import limiter
-from models import Lead, LeadUpdate, GeocodeResponse, RescoreResponse
+from models import Lead, LeadUpdate, GeocodeResponse, RescoreResponse, BatchDeleteRequest
 
 router = APIRouter(prefix="/leads", tags=["leads"])
 
@@ -144,6 +144,15 @@ async def get_lead(lead_id: UUID):
     if not result.data:
         raise HTTPException(status_code=404, detail="Lead not found")
     return result.data[0]
+
+
+@router.delete("", status_code=200, dependencies=[Depends(require_auth)])
+async def batch_delete_leads(payload: BatchDeleteRequest):
+    if not payload.ids:
+        raise HTTPException(status_code=400, detail="No IDs provided")
+    ids = [str(i) for i in payload.ids]
+    supabase.table("leads").delete().in_("id", ids).execute()
+    return {"deleted": len(ids)}
 
 
 @router.delete("/{lead_id}", status_code=204, dependencies=[Depends(require_auth)])

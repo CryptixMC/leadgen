@@ -59,3 +59,7 @@ class RescoreResponse(BaseModel):
     updated: int
     total: int
 
+
+class BatchDeleteRequest(BaseModel):
+    ids: list[UUID]
+

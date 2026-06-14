@@ -1,12 +1,17 @@
 <script lang="ts">
+	import { invalidateAll } from '$app/navigation';
 	import type { PageData } from './$types';
 	import type { Lead } from '$lib/api';
+	import { batchDeleteLeads } from '$lib/api';
+	import { supabase } from '$lib/supabase.js';
 
 	let { data }: { data: PageData } = $props();
 
 	let statusFilter = $state('');
 	let priorityFilter = $state('');
 	let sortAsc = $state(false);
+	let selected = $state(new Set<string>());
+	let deleting = $state(false);
 
 	const STATUSES = ['', 'cold', 'contacted', 'proposal', 'closed_won', 'closed_lost'];
 	const PRIORITIES = ['', 'high', 'medium', 'low'];
@@ -21,6 +26,47 @@
 				return sortAsc ? as - bs : bs - as;
 			})
 	);
+
+	const allFilteredSelected = $derived(
+		filtered.length > 0 && filtered.every((l) => selected.has(l.id))
+	);
+
+	function toggleSelect(id: string, e: Event) {
+		e.stopPropagation();
+		const next = new Set(selected);
+		if (next.has(id)) next.delete(id);
+		else next.add(id);
+		selected = next;
+	}
+
+	function toggleSelectAll(e: Event) {
+		e.stopPropagation();
+		if (allFilteredSelected) {
+			const next = new Set(selected);
+			filtered.forEach((l) => next.delete(l.id));
+			selected = next;
+		} else {
+			const next = new Set(selected);
+			filtered.forEach((l) => next.add(l.id));
+			selected = next;
+		}
+	}
+
+	async function deleteSelected() {
+		if (selected.size === 0) return;
+		if (!confirm(`Delete ${selected.size} lead${selected.size === 1 ? '' : 's'}? This cannot be undone.`)) return;
+		deleting = true;
+		try {
+			const { data: { session } } = await supabase.auth.getSession();
+			await batchDeleteLeads([...selected], session?.access_token);
+			selected = new Set();
+			await invalidateAll();
+		} catch (err) {
+			alert(err instanceof Error ? err.message : 'Delete failed');
+		} finally {
+			deleting = false;
+		}
+	}
 
 	function priorityClass(p: string | null) {
 		if (p === 'high') return 'badge badge-high';
@@ -66,15 +112,30 @@
 				</select>
 			</label>
 		</div>
-		<button class="sort-btn" onclick={() => (sortAsc = !sortAsc)}>
-			Score {sortAsc ? '↑' : '↓'}
-		</button>
+		<div class="right-controls">
+			{#if selected.size > 0}
+				<button class="delete-btn" onclick={deleteSelected} disabled={deleting}>
+					{deleting ? 'Deleting…' : `Delete ${selected.size} selected`}
+				</button>
+			{/if}
+			<button class="sort-btn" onclick={() => (sortAsc = !sortAsc)}>
+				Score {sortAsc ? '↑' : '↓'}
+			</button>
+		</div>
 	</div>
 
 	<div class="table-wrap">
 		<table>
 			<thead>
 				<tr>
+					<th class="check-col">
+						<input
+							type="checkbox"
+							checked={allFilteredSelected}
+							indeterminate={selected.size > 0 && !allFilteredSelected}
+							onclick={toggleSelectAll}
+						/>
+					</th>
 					<th>Business</th>
 					<th>Address</th>
 					<th>Website</th>
@@ -85,7 +146,13 @@
 			</thead>
 			<tbody>
 				{#each filtered as lead (lead.id)}
-					<tr onclick={() => (window.location.href = `/leads/${lead.id}`)}>
+					<tr
+						onclick={() => (window.location.href = `/leads/${lead.id}`)}
+						class:row-selected={selected.has(lead.id)}
+					>
+						<td class="check-col" onclick={(e) => toggleSelect(lead.id, e)}>
+							<input type="checkbox" checked={selected.has(lead.id)} onclick={(e) => e.stopPropagation()} />
+						</td>
 						<td class="name">{lead.business_name}</td>
 						<td class="addr">{lead.address}</td>
 						<td>
@@ -110,7 +177,7 @@
 				{/each}
 				{#if filtered.length === 0}
 					<tr>
-						<td colspan="6" class="empty">No leads match your filters.</td>
+						<td colspan="7" class="empty">No leads match your filters.</td>
 					</tr>
 				{/if}
 			</tbody>
@@ -178,8 +245,14 @@
 		border-color: #7c3aed;
 	}
 
-	.sort-btn {
+	.right-controls {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
 		margin-left: auto;
+	}
+
+	.sort-btn {
 		background: transparent;
 		border: 1px solid #2a2a3e;
 		color: #94a3b8;
@@ -194,6 +267,28 @@
 	.sort-btn:hover {
 		border-color: #7c3aed;
 		color: #7c3aed;
+	}
+
+	.delete-btn {
+		background: transparent;
+		border: 1px solid #7f1d1d;
+		color: #f87171;
+		padding: 0.35rem 0.75rem;
+		border-radius: 6px;
+		cursor: pointer;
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 0.8rem;
+		transition: border-color 0.15s, color 0.15s, background 0.15s;
+	}
+
+	.delete-btn:hover:not(:disabled) {
+		background: #7f1d1d22;
+		border-color: #f87171;
+	}
+
+	.delete-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
 	}
 
 	.table-wrap {
@@ -229,6 +324,20 @@
 		color: #7c3aed;
 	}
 
+	.check-col {
+		width: 2.5rem;
+		text-align: center !important;
+		padding-left: 0.75rem !important;
+		padding-right: 0.5rem !important;
+	}
+
+	input[type='checkbox'] {
+		accent-color: #7c3aed;
+		cursor: pointer;
+		width: 15px;
+		height: 15px;
+	}
+
 	tbody tr {
 		border-top: 1px solid #1a1a2e;
 		cursor: pointer;
@@ -237,6 +346,14 @@
 
 	tbody tr:hover {
 		background: #13131f;
+	}
+
+	tbody tr.row-selected {
+		background: #1a1030;
+	}
+
+	tbody tr.row-selected:hover {
+		background: #1f1238;
 	}
 
 	td {
@@ -329,7 +446,7 @@
 	}
 
 	.badge-lost {
-		background: #2a1a1a;
+		background: #2a1a4a;
 		color: #f87171;
 	}
 

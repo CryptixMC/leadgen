@@ -102,6 +102,19 @@ export async function deleteLead(id: string, token?: string): Promise<void> {
 	if (!res.ok) throw new Error(`Failed to delete lead: ${res.statusText}`);
 }
 
+export async function batchDeleteLeads(
+	ids: string[],
+	token?: string
+): Promise<{ deleted: number }> {
+	const res = await fetch(`${BASE}/leads`, {
+		method: 'DELETE',
+		headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
+		body: JSON.stringify({ ids })
+	});
+	if (!res.ok) throw new Error(`Failed to batch delete: ${res.statusText}`);
+	return res.json();
+}
+
 export async function triggerScrape(
 	category: string,
 	city: string,
