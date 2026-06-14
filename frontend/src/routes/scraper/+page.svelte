@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { triggerScrape } from '$lib/api';
+	import { triggerScrape, rescoreLeads } from '$lib/api';
 	import { supabase } from '$lib/supabase.js';
 
 	let category = $state('');
@@ -7,6 +7,24 @@
 	let loading = $state(false);
 	let result = $state<{ upserted: number; category: string; city: string } | null>(null);
 	let error = $state('');
+
+	let rescoreLoading = $state(false);
+	let rescoreResult = $state<{ updated: number; total: number } | null>(null);
+	let rescoreError = $state('');
+
+	async function handleRescore() {
+		rescoreLoading = true;
+		rescoreError = '';
+		rescoreResult = null;
+		try {
+			const { data: { session } } = await supabase.auth.getSession();
+			rescoreResult = await rescoreLeads(session?.access_token);
+		} catch (err) {
+			rescoreError = err instanceof Error ? err.message : 'Rescore failed';
+		} finally {
+			rescoreLoading = false;
+		}
+	}
 
 	async function handleSubmit(e: Event) {
 		e.preventDefault();
@@ -87,6 +105,37 @@
 
 	{#if error}
 		<div class="status-card err">{error}</div>
+	{/if}
+
+	<div class="section-divider"></div>
+
+	<h2 class="section-title">Rescore Leads</h2>
+	<p class="subtitle">Recalculates lead score and priority for every lead in the database.</p>
+
+	<div class="card">
+		<button class="submit-btn" onclick={handleRescore} disabled={rescoreLoading}>
+			{rescoreLoading ? 'Rescoring…' : 'Rescore All Leads'}
+		</button>
+	</div>
+
+	{#if rescoreLoading}
+		<div class="status-card info">
+			<span class="spinner"></span>
+			Recalculating scores for all leads…
+		</div>
+	{/if}
+
+	{#if rescoreResult}
+		<div class="status-card success">
+			<div class="result-headline">
+				<span class="result-num">{rescoreResult.updated}</span>
+				<span>/ {rescoreResult.total} leads updated</span>
+			</div>
+		</div>
+	{/if}
+
+	{#if rescoreError}
+		<div class="status-card err">{rescoreError}</div>
 	{/if}
 </main>
 
@@ -251,5 +300,16 @@
 		to {
 			transform: rotate(360deg);
 		}
+	}
+
+	.section-divider {
+		border-top: 1px solid #1a1a2e;
+		margin: 2rem 0 1.5rem;
+	}
+
+	.section-title {
+		font-size: 1.25rem;
+		color: #f1f5f9;
+		margin-bottom: 0.4rem;
 	}
 </style>

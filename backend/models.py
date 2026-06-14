@@ -54,3 +54,8 @@ class GeocodeResponse(BaseModel):
     failed: int
     skipped: int
 
+
+class RescoreResponse(BaseModel):
+    updated: int
+    total: int
+

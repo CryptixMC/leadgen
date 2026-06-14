@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import type { PageData } from './$types';
-	import { updateLead, type Lead } from '$lib/api';
+	import { updateLead, deleteLead, type Lead } from '$lib/api';
 	import { supabase } from '$lib/supabase.js';
 	import { goto } from '$app/navigation';
 
@@ -11,6 +11,8 @@
 	let notes = $state(untrack(() => lead.notes ?? ''));
 	let saving = $state(false);
 	let saveMsg = $state('');
+	let confirmDelete = $state(false);
+	let deleting = $state(false);
 
 	const STATUSES = ['cold', 'contacted', 'proposal', 'closed_won', 'closed_lost'];
 
@@ -50,6 +52,23 @@
 		return String(val);
 	}
 
+	async function handleDelete() {
+		if (!confirmDelete) {
+			confirmDelete = true;
+			return;
+		}
+		deleting = true;
+		try {
+			await deleteLead(lead.id, await getToken());
+			goto('/');
+		} catch {
+			saveMsg = 'Failed to delete lead.';
+			deleting = false;
+			confirmDelete = false;
+			setTimeout(() => (saveMsg = ''), 2500);
+		}
+	}
+
 	function scoreColor(s: number | null) {
 		if (s === null) return '#64748b';
 		if (s >= 60) return '#d946ef';
@@ -65,6 +84,14 @@
 <main>
 	<div class="back-row">
 		<button class="back-btn" onclick={() => goto('/')}>← Back</button>
+		<button
+			class="delete-btn"
+			class:confirm={confirmDelete}
+			onclick={handleDelete}
+			disabled={deleting}
+		>
+			{deleting ? 'Deleting…' : confirmDelete ? 'Confirm delete?' : 'Delete lead'}
+		</button>
 	</div>
 
 	<div class="lead-header">
@@ -351,6 +378,36 @@
 	}
 
 	.back-row {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
 		margin-bottom: 0.5rem;
+	}
+
+	.delete-btn {
+		background: transparent;
+		border: 1px solid #3d1a1a;
+		color: #f87171;
+		padding: 0.35rem 0.85rem;
+		border-radius: 6px;
+		cursor: pointer;
+		font-size: 0.8rem;
+		transition: background 0.15s, border-color 0.15s;
+	}
+
+	.delete-btn:hover:not(:disabled) {
+		background: #2a1a1a;
+		border-color: #f87171;
+	}
+
+	.delete-btn.confirm {
+		background: #7f1d1d;
+		border-color: #f87171;
+		color: #fff;
+	}
+
+	.delete-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
 	}
 </style>

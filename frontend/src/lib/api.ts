@@ -83,6 +83,25 @@ export async function geocodeMissing(
 	return res.json();
 }
 
+export async function rescoreLeads(
+	token?: string
+): Promise<{ updated: number; total: number }> {
+	const res = await fetch(`${BASE}/leads/rescore`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json', ...authHeaders(token) }
+	});
+	if (!res.ok) throw new Error(`Rescore failed: ${res.statusText}`);
+	return res.json();
+}
+
+export async function deleteLead(id: string, token?: string): Promise<void> {
+	const res = await fetch(`${BASE}/leads/${id}`, {
+		method: 'DELETE',
+		headers: authHeaders(token)
+	});
+	if (!res.ok) throw new Error(`Failed to delete lead: ${res.statusText}`);
+}
+
 export async function triggerScrape(
 	category: string,
 	city: string,

@@ -1,6 +1,7 @@
 import io
 import os
 import httpx
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -10,9 +11,30 @@ from fastapi.responses import StreamingResponse
 from auth import require_auth
 from db import supabase
 from limiter import limiter
-from models import Lead, LeadUpdate, GeocodeResponse
+from models import Lead, LeadUpdate, GeocodeResponse, RescoreResponse
 
 router = APIRouter(prefix="/leads", tags=["leads"])
+
+
+def _batch_score(lead: dict) -> tuple[int, str]:
+    score = 0
+    if not lead.get("has_website"):
+        score += 40
+    if lead.get("mobile_friendly") is False:
+        score += 20
+    ps = lead.get("pagespeed_mobile")
+    if ps is not None and ps < 50:
+        score += 15
+    if not lead.get("has_https"):
+        score += 10
+    if (lead.get("review_count") or 0) < 10:
+        score += 10
+    if not lead.get("also_on_yelp") and lead.get("has_gbp"):
+        score += 5
+    score = min(score, 100)
+    priority = "high" if score >= 60 else "medium" if score >= 30 else "low"
+    return score, priority
+
 
 TSV_COLUMNS = [
     "id", "business_name", "address", "phone", "website_url",
@@ -85,6 +107,23 @@ async def geocode_missing(request: Request):
     return GeocodeResponse(geocoded=geocoded, failed=failed, skipped=skipped)
 
 
+@router.post("/rescore", response_model=RescoreResponse, dependencies=[Depends(require_auth)])
+@limiter.limit("5/minute")
+async def rescore_all_leads(request: Request):
+    leads = (supabase.table("leads").select("*").execute()).data or []
+    now = datetime.now(timezone.utc).isoformat()
+    updated = 0
+    for lead in leads:
+        score, priority = _batch_score(lead)
+        if lead.get("lead_score") == score and lead.get("priority") == priority:
+            continue
+        supabase.table("leads").update(
+            {"lead_score": score, "priority": priority, "last_updated": now}
+        ).eq("id", lead["id"]).execute()
+        updated += 1
+    return RescoreResponse(updated=updated, total=len(leads))
+
+
 @router.get("", response_model=list[Lead], dependencies=[Depends(require_auth)])
 async def list_leads(
     status: Optional[str] = Query(None),
@@ -107,13 +146,17 @@ async def get_lead(lead_id: UUID):
     return result.data[0]
 
 
+@router.delete("/{lead_id}", status_code=204, dependencies=[Depends(require_auth)])
+async def delete_lead(lead_id: UUID):
+    supabase.table("leads").delete().eq("id", str(lead_id)).execute()
+
+
 @router.patch("/{lead_id}", response_model=Lead, dependencies=[Depends(require_auth)])
 async def update_lead(lead_id: UUID, payload: LeadUpdate):
     update_data = payload.model_dump(exclude_none=True)
     if not update_data:
         raise HTTPException(status_code=400, detail="No updatable fields provided")
 
-    from datetime import datetime, timezone
     update_data["last_updated"] = datetime.now(timezone.utc).isoformat()
 
     result = (
