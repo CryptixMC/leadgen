@@ -13,31 +13,9 @@ from db import supabase
 from limiter import limiter
 from models import Lead, LeadUpdate, GeocodeResponse, RescoreResponse, BatchDeleteRequest
 from routers.enrichment import run_enrichment
+from scoring import calculate_score
 
 router = APIRouter(prefix="/leads", tags=["leads"])
-
-
-def _batch_score(lead: dict) -> tuple[int, str]:
-    score = 0
-    if not lead.get("has_website"):
-        if lead.get("website_inferred"):
-            score += 20
-        else:
-            score += 40
-    if lead.get("mobile_friendly") is False:
-        score += 20
-    ps = lead.get("pagespeed_mobile")
-    if ps is not None and ps < 50:
-        score += 15
-    if not lead.get("has_https"):
-        score += 10
-    if (lead.get("review_count") or 0) < 10:
-        score += 10
-    if not lead.get("also_on_yelp") and lead.get("has_gbp"):
-        score += 5
-    score = min(score, 100)
-    priority = "high" if score >= 60 else "medium" if score >= 30 else "low"
-    return score, priority
 
 
 TSV_COLUMNS = [
@@ -121,7 +99,7 @@ async def rescore_all_leads(request: Request):
         for lead in leads:
             enrichment = await run_enrichment(client, lead)
             merged = {**lead, **enrichment}
-            score, priority = _batch_score(merged)
+            score, priority = calculate_score(merged)
             enrichment["lead_score"] = score
             enrichment["priority"] = priority
             enrichment["last_updated"] = now
