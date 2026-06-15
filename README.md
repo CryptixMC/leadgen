@@ -20,7 +20,7 @@ Built for Liam Nicholson Business Tech Consulting.
 | Layer | Tool | Hosting |
 |---|---|---|
 | Database | Supabase (Postgres) | Supabase cloud |
-| Backend | FastAPI (Python) | Render (free tier) |
+| Backend | FastAPI (Python) | Vercel |
 | Frontend | SvelteKit | Vercel |
 | Scraping | Google Places API | — |
 | Enrichment | Google PageSpeed Insights + Yelp Fusion | — |
@@ -38,20 +38,18 @@ lead-generator/
 │       ├── scraper/                # trigger scrapes from UI
 │       ├── map/                    # map view of leads
 │       └── login/                  # auth
-├── backend/                # FastAPI app
-│   ├── main.py
-│   ├── auth.py                     # token-based auth
-│   ├── limiter.py                  # rate limiting (slowapi)
-│   ├── db.py                       # Supabase client (singleton)
-│   ├── models.py                   # Pydantic schemas
-│   ├── utils.py
-│   └── routers/
-│       ├── leads.py                # CRUD + export
-│       ├── scraper.py              # Google Places scraper
-│       └── enrichment.py          # PageSpeed, Yelp, re-scoring
-└── scripts/                # Standalone scripts — run locally
-    ├── scrape_batch.py             # batch scrape by category/city
-    └── score_leads.py              # re-score all existing leads
+└── backend/                # FastAPI app
+    ├── main.py
+    ├── auth.py                     # Supabase JWT auth
+    ├── limiter.py                  # rate limiting (slowapi)
+    ├── db.py                       # Supabase client (singleton)
+    ├── models.py                   # Pydantic schemas
+    ├── utils.py
+    ├── vercel.json                 # Vercel serverless config
+    └── routers/
+        ├── leads.py                # CRUD + export
+        ├── scraper.py              # Google Places scraper
+        └── enrichment.py          # PageSpeed, Yelp, re-scoring
 ```
 
 ---
@@ -85,20 +83,6 @@ npm install
 npm run dev
 ```
 
-### Scripts (optional, run ad-hoc)
-
-```bash
-cd scripts
-cp ../.env.example .env   # same keys as backend
-pip install -r requirements.txt
-
-# Scrape a category in a city
-python scrape_batch.py --category "restaurant" --city "Winnipeg MB" --limit 100
-
-# Re-score all leads already in the database
-python score_leads.py
-```
-
 ---
 
 ## Environment variables
@@ -112,8 +96,7 @@ SUPABASE_KEY=
 GOOGLE_PLACES_API_KEY=
 GOOGLE_PAGESPEED_API_KEY=
 YELP_API_KEY=
-FRONTEND_URL=                  # your Vercel URL, for CORS
-SCRIPT_API_TOKEN=              # generate: python -c "import secrets; print(secrets.token_hex(32))"
+FRONTEND_URL=                  # your Vercel frontend URL, for CORS
 
 # Frontend (safe to expose — Vite PUBLIC_ prefix)
 PUBLIC_SUPABASE_URL=
@@ -190,10 +173,15 @@ Table: `leads`
 
 ## Deployment
 
-**Backend → Render**
-- Set all backend env vars in Render dashboard
-- Start command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
+Both the frontend and backend deploy to Vercel. Set up two separate Vercel projects — one for each directory.
+
+**Backend → Vercel**
+- Create a Vercel project pointed at the `backend/` subdirectory
+- `vercel.json` is already configured — no additional build settings needed
+- Set all backend env vars in the Vercel project settings:
+  `SUPABASE_URL`, `SUPABASE_KEY`, `GOOGLE_PLACES_API_KEY`, `GOOGLE_PAGESPEED_API_KEY`, `YELP_API_KEY`, `FRONTEND_URL`
 
 **Frontend → Vercel**
-- Set `PUBLIC_SUPABASE_URL` and `PUBLIC_SUPABASE_ANON_KEY` in Vercel project settings
+- Create a Vercel project pointed at the `frontend/` subdirectory
+- Set `PUBLIC_SUPABASE_URL`, `PUBLIC_SUPABASE_ANON_KEY`, and `PUBLIC_API_URL` (your backend Vercel URL) in project settings
 - Deploys automatically on push to `main`

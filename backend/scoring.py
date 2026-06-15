@@ -1,8 +1,6 @@
 """Unified lead scoring — single source of truth for the backend.
 
-Import calculate_score in routers; do not re-implement scoring elsewhere
-inside the backend package. scripts/score_leads.py intentionally duplicates
-this logic because it cannot import from the backend package.
+Import calculate_score in routers; do not re-implement scoring elsewhere.
 """
 
 

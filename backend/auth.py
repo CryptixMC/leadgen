@@ -1,5 +1,3 @@
-import os
-import secrets
 from typing import Optional
 
 from fastapi import Header, HTTPException
@@ -11,12 +9,6 @@ async def require_auth(authorization: Optional[str] = Header(None)):
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Unauthorized")
     token = authorization.removeprefix("Bearer ")
-
-    # Allow a pre-shared script token for local CLI scripts
-    script_token = os.getenv("SCRIPT_API_TOKEN")
-    if script_token and secrets.compare_digest(token, script_token):
-        return None
-
     try:
         response = supabase.auth.get_user(token)
         if not response.user:
