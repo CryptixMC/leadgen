@@ -49,8 +49,8 @@ def calculate_score(data: dict) -> tuple[int, str]:
         elif pagespeed_bp < 80:
             score += 5
 
-    # HTTPS
-    if not data.get("has_https"):
+    # HTTPS — only meaningful when a website exists; no-website already penalised above
+    if data.get("has_website") and not data.get("has_https"):
         score += 10
 
     # Review count

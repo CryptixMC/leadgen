@@ -1,3 +1,4 @@
+import asyncio
 import io
 import os
 import httpx
@@ -62,30 +63,36 @@ async def geocode_missing(request: Request):
         .execute()
     ).data or []
 
-    geocoded = failed = skipped = 0
-    async with httpx.AsyncClient(timeout=15) as client:
-        for row in rows:
+    _limits = httpx.Limits(max_connections=50, max_keepalive_connections=20, keepalive_expiry=5.0)
+    sem = asyncio.Semaphore(5)
+
+    async with httpx.AsyncClient(timeout=15, limits=_limits) as client:
+        async def _geocode_one(row: dict) -> tuple[int, int, int]:
             place_id = row.get("google_place_id")
             if not place_id:
-                skipped += 1
-                continue
-            try:
-                res = await client.get(PLACES_DETAIL_URL, params={
-                    "place_id": place_id,
-                    "fields": "geometry",
-                    "key": api_key,
-                })
-                data = res.json()
-                loc = data.get("result", {}).get("geometry", {}).get("location", {})
-                lat, lng = loc.get("lat"), loc.get("lng")
-                if lat is not None and lng is not None:
-                    supabase.table("leads").update({"latitude": lat, "longitude": lng}).eq("id", row["id"]).execute()
-                    geocoded += 1
-                else:
-                    failed += 1
-            except Exception:
-                failed += 1
+                return (0, 0, 1)
+            async with sem:
+                try:
+                    res = await client.get(PLACES_DETAIL_URL, params={
+                        "place_id": place_id,
+                        "fields": "geometry",
+                        "key": api_key,
+                    })
+                    data = res.json()
+                    loc = data.get("result", {}).get("geometry", {}).get("location", {})
+                    lat, lng = loc.get("lat"), loc.get("lng")
+                    if lat is not None and lng is not None:
+                        supabase.table("leads").update({"latitude": lat, "longitude": lng}).eq("id", row["id"]).execute()
+                        return (1, 0, 0)
+                    return (0, 1, 0)
+                except Exception:
+                    return (0, 1, 0)
 
+        counts = await asyncio.gather(*[_geocode_one(row) for row in rows])
+
+    geocoded = sum(c[0] for c in counts)
+    failed = sum(c[1] for c in counts)
+    skipped = sum(c[2] for c in counts)
     return GeocodeResponse(geocoded=geocoded, failed=failed, skipped=skipped)
 
 
@@ -94,17 +101,26 @@ async def geocode_missing(request: Request):
 async def rescore_all_leads(request: Request):
     leads = (supabase.table("leads").select("*").execute()).data or []
     now = datetime.now(timezone.utc).isoformat()
-    updated = 0
-    async with httpx.AsyncClient() as client:
-        for lead in leads:
-            enrichment = await run_enrichment(client, lead)
-            merged = {**lead, **enrichment}
-            score, priority = calculate_score(merged)
-            enrichment["lead_score"] = score
-            enrichment["priority"] = priority
-            enrichment["last_updated"] = now
-            supabase.table("leads").update(enrichment).eq("id", lead["id"]).execute()
-            updated += 1
+    sem = asyncio.Semaphore(5)
+
+    async def _enrich_and_save(client: httpx.AsyncClient, lead: dict) -> bool:
+        async with sem:
+            try:
+                enrichment = await run_enrichment(client, lead)
+                merged = {**lead, **enrichment}
+                score, priority = calculate_score(merged)
+                enrichment["lead_score"] = score
+                enrichment["priority"] = priority
+                enrichment["last_updated"] = now
+                supabase.table("leads").update(enrichment).eq("id", lead["id"]).execute()
+                return True
+            except Exception:
+                return False
+
+    async with httpx.AsyncClient(limits=httpx.Limits(max_connections=50, max_keepalive_connections=20, keepalive_expiry=5.0)) as client:
+        results = await asyncio.gather(*[_enrich_and_save(client, lead) for lead in leads])
+
+    updated = sum(1 for r in results if r is True)
     return RescoreResponse(updated=updated, total=len(leads))
 
 
@@ -124,7 +140,7 @@ async def create_lead(payload: LeadCreate):
         "created_at": now,
         "last_updated": now,
     }
-    score, priority = _batch_score(lead)
+    score, priority = calculate_score(lead)
     lead["lead_score"] = score
     lead["priority"] = priority
 

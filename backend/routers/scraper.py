@@ -121,6 +121,12 @@ async def scrape(request: Request, payload: ScrapeRequest):
     city_lng: float | None = None
 
     async with httpx.AsyncClient(timeout=120) as client:
+        sem = asyncio.Semaphore(8)
+
+        async def _upsert_safe(place: dict) -> bool:
+            async with sem:
+                return await _upsert_place(client, place, api_key)
+
         # Page 1: Text Search to get results + extract city lat/lng from geometry
         search_data = await _get_with_backoff(client, PLACES_SEARCH_URL, {
             "query": f"{payload.category} in {payload.city}",
@@ -134,17 +140,15 @@ async def scrape(request: Request, payload: ScrapeRequest):
         pages_fetched += 1
         places = search_data.get("results", [])
 
-        for place in places:
-            if upserted >= target:
-                break
-            # Grab city center from the first result
-            if city_lat is None:
-                loc = place.get("geometry", {}).get("location", {})
-                city_lat = loc.get("lat")
-                city_lng = loc.get("lng")
-            ok = await _upsert_place(client, place, api_key)
-            if ok:
-                upserted += 1
+        # Extract city center from first result before batching
+        if places:
+            loc = places[0].get("geometry", {}).get("location", {})
+            city_lat = loc.get("lat")
+            city_lng = loc.get("lng")
+
+        batch = places[:target]
+        results = await asyncio.gather(*[_upsert_safe(p) for p in batch])
+        upserted += sum(1 for r in results if r)
 
         # Pages 2+: Nearby Search (its next_page_token works correctly)
         if upserted < target and city_lat is not None:
@@ -171,12 +175,9 @@ async def scrape(request: Request, payload: ScrapeRequest):
                 pages_fetched += 1
                 places = search_data.get("results", [])
 
-                for place in places:
-                    if upserted >= target:
-                        break
-                    ok = await _upsert_place(client, place, api_key)
-                    if ok:
-                        upserted += 1
+                batch = places[:max(0, target - upserted)]
+                results = await asyncio.gather(*[_upsert_safe(p) for p in batch])
+                upserted += sum(1 for r in results if r)
 
                 next_page_token = search_data.get("next_page_token")
                 if not next_page_token:

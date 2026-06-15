@@ -1,3 +1,5 @@
+import asyncio
+import difflib
 import logging
 import os
 import re
@@ -45,9 +47,17 @@ async def _fetch_pagespeed(client: httpx.AsyncClient, url: str) -> dict:
     if api_key:
         base_params.append(("key", api_key))
 
+    desktop_params: list[tuple[str, str]] = [("url", url), ("strategy", "desktop"), ("category", "performance")]
+    if api_key:
+        desktop_params.append(("key", api_key))
+
     try:
-        resp = await client.get(PAGESPEED_URL, params=base_params, timeout=45)
+        resp, resp_d = await asyncio.gather(
+            client.get(PAGESPEED_URL, params=base_params, timeout=45),
+            client.get(PAGESPEED_URL, params=desktop_params, timeout=45),
+        )
         resp.raise_for_status()
+        resp_d.raise_for_status()
         data = resp.json()
         lhr = data.get("lighthouseResult", {})
         categories = lhr.get("categories", {})
@@ -58,11 +68,6 @@ async def _fetch_pagespeed(client: httpx.AsyncClient, url: str) -> dict:
 
         mobile_int = _score("performance")
 
-        desktop_params = [("url", url), ("strategy", "desktop"), ("category", "performance")]
-        if api_key:
-            desktop_params.append(("key", api_key))
-        resp_d = await client.get(PAGESPEED_URL, params=desktop_params, timeout=45)
-        resp_d.raise_for_status()
         data_d = resp_d.json()
         categories_d = data_d.get("lighthouseResult", {}).get("categories", {})
         desktop_score = categories_d.get("performance", {}).get("score")
@@ -115,6 +120,11 @@ async def _fetch_yelp(client: httpx.AsyncClient, business_name: str, address: st
         our_digits = re.sub(r"\D", "", phone or "")
 
         for biz in businesses:
+            yelp_name = biz.get("name", "").lower().strip()
+            name_ratio = difflib.SequenceMatcher(None, business_name.lower(), yelp_name).ratio()
+            if name_ratio < 0.5:
+                continue
+
             yelp_city = biz.get("location", {}).get("city", "").lower().strip()
             if yelp_city and our_city and yelp_city not in our_city and our_city not in yelp_city:
                 continue
@@ -262,11 +272,18 @@ async def run_enrichment(client: httpx.AsyncClient, lead: dict) -> dict:
             enrichment["website_url"] = website_url
         enrichment["website_inferred"] = website_inferred
 
+    _biz = lead.get("business_name", "")
+    _addr = lead.get("address", "")
+    _phone = lead.get("phone", "") or ""
+
     if website_url:
         enrichment["has_https"] = website_url.startswith("https://")
-        pagespeed = await _fetch_pagespeed(client, website_url)
+        pagespeed, website_data, yelp = await asyncio.gather(
+            _fetch_pagespeed(client, website_url),
+            _scrape_website(client, website_url),
+            _fetch_yelp(client, _biz, _addr, _phone),
+        )
         enrichment.update(pagespeed)
-        website_data = await _scrape_website(client, website_url)
         if website_data.get("email"):
             enrichment["email"] = website_data["email"]
         if website_data.get("site_age_estimate"):
@@ -280,15 +297,9 @@ async def run_enrichment(client: httpx.AsyncClient, lead: dict) -> dict:
             "pagespeed_seo": None,
             "pagespeed_best_practices": None,
         })
+        yelp = await _fetch_yelp(client, _biz, _addr, _phone)
 
-    yelp = await _fetch_yelp(
-        client,
-        lead.get("business_name", ""),
-        lead.get("address", ""),
-        lead.get("phone", "") or "",
-    )
     enrichment.update(yelp)
-
     return enrichment
 
 
@@ -300,7 +311,7 @@ async def enrich_lead(request: Request, lead_id: UUID):
         raise HTTPException(status_code=404, detail="Lead not found")
     lead = result.data[0]
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(limits=httpx.Limits(max_connections=50, max_keepalive_connections=20, keepalive_expiry=5.0)) as client:
         enrichment = await run_enrichment(client, lead)
 
     merged = {**lead, **enrichment}

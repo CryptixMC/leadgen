@@ -2,7 +2,7 @@
 	import { invalidateAll } from '$app/navigation';
 	import type { PageData } from './$types';
 	import type { Lead } from '$lib/api';
-	import { batchDeleteLeads, createLead, getClientToken } from '$lib/api';
+	import { batchDeleteLeads, createLead, enrichLead, getClientToken } from '$lib/api';
 
 	let { data }: { data: PageData } = $props();
 
@@ -11,6 +11,9 @@
 	let sortAsc = $state(false);
 	let selected = $state(new Set<string>());
 	let deleting = $state(false);
+	let enriching = $state(false);
+	let enrichProgress = $state({ done: 0, total: 0 });
+	let enrichCurrentName = $state('');
 
 	let showCreateModal = $state(false);
 	let createLoading = $state(false);
@@ -100,6 +103,30 @@
 		}
 	}
 
+	async function enrichSelected() {
+		if (selected.size === 0) return;
+		enriching = true;
+		const ids = [...selected];
+		enrichProgress = { done: 0, total: ids.length };
+		try {
+			for (const id of ids) {
+				const lead = (data.leads as { id: string; business_name: string }[]).find((l) => l.id === id);
+				enrichCurrentName = lead?.business_name ?? '';
+				await enrichLead(id, getClientToken());
+				enrichProgress = { ...enrichProgress, done: enrichProgress.done + 1 };
+			}
+			enrichCurrentName = '';
+			selected = new Set();
+			await invalidateAll();
+		} catch (err) {
+			alert(err instanceof Error ? err.message : 'Enrich failed');
+		} finally {
+			enriching = false;
+			enrichProgress = { done: 0, total: 0 };
+			enrichCurrentName = '';
+		}
+	}
+
 	async function deleteSelected() {
 		if (selected.size === 0) return;
 		if (!confirm(`Delete ${selected.size} lead${selected.size === 1 ? '' : 's'}? This cannot be undone.`)) return;
@@ -161,7 +188,12 @@
 		</div>
 		<div class="right-controls">
 			{#if selected.size > 0}
-				<button class="delete-btn" onclick={deleteSelected} disabled={deleting}>
+				<button class="enrich-btn" onclick={enrichSelected} disabled={enriching || deleting}>
+					{enriching
+						? `Enriching ${enrichProgress.done}/${enrichProgress.total}…`
+						: `Enrich ${selected.size} selected`}
+				</button>
+				<button class="delete-btn" onclick={deleteSelected} disabled={deleting || enriching}>
 					{deleting ? 'Deleting…' : `Delete ${selected.size} selected`}
 				</button>
 			{/if}
@@ -171,6 +203,18 @@
 			<button class="new-lead-btn" onclick={openCreateModal}>+ New Lead</button>
 		</div>
 	</div>
+
+	{#if enriching && enrichProgress.total > 0}
+		{@const pct = Math.round((enrichProgress.done / enrichProgress.total) * 100)}
+		<div class="enrich-progress">
+			<div class="progress-track">
+				<div class="progress-fill" style="width: {pct}%"></div>
+			</div>
+			{#if enrichCurrentName}
+				<div class="progress-lead-name">{enrichCurrentName}</div>
+			{/if}
+		</div>
+	{/if}
 
 	<div class="table-wrap">
 		<table>
@@ -416,6 +460,28 @@
 	}
 
 	.delete-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.enrich-btn {
+		background: transparent;
+		border: 1px solid #14532d;
+		color: #4ade80;
+		padding: 0.35rem 0.75rem;
+		border-radius: 6px;
+		cursor: pointer;
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 0.8rem;
+		transition: border-color 0.15s, color 0.15s, background 0.15s;
+	}
+
+	.enrich-btn:hover:not(:disabled) {
+		background: #14532d22;
+		border-color: #4ade80;
+	}
+
+	.enrich-btn:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
 	}
@@ -789,5 +855,37 @@
 	.submit-btn:disabled {
 		opacity: 0.55;
 		cursor: not-allowed;
+	}
+
+	.enrich-progress {
+		margin-bottom: 0.75rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+	}
+
+	.progress-track {
+		width: 100%;
+		height: 4px;
+		background: #2a2a3e;
+		border-radius: 2px;
+		overflow: hidden;
+	}
+
+	.progress-fill {
+		height: 100%;
+		background: linear-gradient(90deg, #4ade80, #22c55e);
+		border-radius: 2px;
+		transition: width 0.3s ease;
+	}
+
+	.progress-lead-name {
+		font-size: 0.72rem;
+		color: #64748b;
+		font-style: italic;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		max-width: 400px;
 	}
 </style>
