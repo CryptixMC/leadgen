@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import type { PageData } from './$types';
-	import { updateLead, deleteLead, enrichLead, generateEmail, sendLeadEmail, type Lead } from '$lib/api';
+	import { updateLead, deleteLead, enrichLead, generateEmail, type Lead } from '$lib/api';
 	import { EMAIL_TEMPLATES, fillTemplate, type EmailTemplate } from '$lib/emailTemplates';
 	import { goto } from '$app/navigation';
 
@@ -89,9 +89,9 @@
 	let emailBody = $state('');
 	let generating = $state(false);
 	let generateError = $state('');
-	let sending = $state(false);
-	let sendError = $state('');
-	let sendSuccess = $state(false);
+	let emailOpened = $state(false);
+	let logging = $state(false);
+	let logMsg = $state('');
 	let markContacted = $state(false);
 
 	const defaultTemplate = $derived(
@@ -107,8 +107,8 @@
 		selectedTemplate = defaultTemplate;
 		markContacted = lead.status === 'cold';
 		generateError = '';
-		sendError = '';
-		sendSuccess = false;
+		emailOpened = false;
+		logMsg = '';
 		const vars = getTemplateVars();
 		emailSubject = fillTemplate(selectedTemplate.subject, vars);
 		emailBody = fillTemplate(selectedTemplate.body, vars);
@@ -141,26 +141,34 @@
 		}
 	}
 
-	async function handleSendEmail() {
-		sending = true;
-		sendError = '';
+	function handleOpenEmail() {
+		const subject = encodeURIComponent(emailSubject);
+		const body = encodeURIComponent(emailBody);
+		window.open(`mailto:${lead.email}?subject=${subject}&body=${body}`);
+		emailOpened = true;
+	}
+
+	async function handleLogEmail() {
+		logging = true;
+		logMsg = '';
 		try {
-			const updated = await sendLeadEmail(lead.id, {
-				subject: emailSubject,
-				emailBody,
-				markContacted
-			});
-			lead = updated;
-			notes = updated.notes ?? '';
-			sendSuccess = true;
+			const timestamp = new Date().toLocaleString();
+			const noteEntry = `Email opened: ${timestamp} — ${emailSubject}`;
+			const updatedNotes = lead.notes ? `${lead.notes}\n${noteEntry}` : noteEntry;
+			const updateData: { notes: string; status?: string } = { notes: updatedNotes };
+			if (markContacted && lead.status === 'cold') updateData.status = 'contacted';
+			lead = await updateLead(lead.id, updateData);
+			notes = lead.notes ?? '';
+			logMsg = 'Logged!';
 			setTimeout(() => {
 				emailModalOpen = false;
-				sendSuccess = false;
-			}, 1800);
+				emailOpened = false;
+				logMsg = '';
+			}, 1200);
 		} catch (e) {
-			sendError = e instanceof Error ? e.message : 'Failed to send email.';
+			logMsg = e instanceof Error ? e.message : 'Failed to log.';
 		} finally {
-			sending = false;
+			logging = false;
 		}
 	}
 
@@ -379,89 +387,98 @@
 				<button class="modal-close" onclick={() => (emailModalOpen = false)} aria-label="Close">✕</button>
 			</div>
 
-			<div class="modal-body">
-				<div class="form-row">
-					<span class="field-label">To</span>
-					<div class="static-field">{lead.email}</div>
+			{#if !emailOpened}
+				<div class="modal-body">
+					<div class="form-row">
+						<span class="field-label">To</span>
+						<div class="static-field">{lead.email}</div>
+					</div>
+
+					<div class="form-row">
+						<label for="sender-name">Your Name</label>
+						<input
+							id="sender-name"
+							type="text"
+							bind:value={senderName}
+							placeholder="e.g. Liam Nicholson"
+							onchange={onTemplateChange}
+						/>
+					</div>
+
+					<div class="form-row">
+						<label for="template-select">Template</label>
+						<select id="template-select" bind:value={selectedTemplate} onchange={onTemplateChange}>
+							{#each EMAIL_TEMPLATES as tmpl}
+								<option value={tmpl}>{tmpl.label}</option>
+							{/each}
+						</select>
+					</div>
+
+					<div class="form-row">
+						<label for="extra-context">Context for AI <span class="optional">(optional)</span></label>
+						<input
+							id="extra-context"
+							type="text"
+							bind:value={extraContext}
+							placeholder="e.g. they have 50 reviews but no website in rural Montana"
+						/>
+					</div>
+
+					<div class="ai-row">
+						<button class="generate-btn" onclick={handleGenerate} disabled={generating}>
+							{generating ? 'Generating…' : '✦ Generate with AI'}
+						</button>
+						{#if generateError}
+							<span class="error-msg">{generateError} — you can still edit manually below.</span>
+						{/if}
+					</div>
+
+					<div class="form-row">
+						<label for="email-subject">Subject</label>
+						<input id="email-subject" type="text" bind:value={emailSubject} />
+					</div>
+
+					<div class="form-row">
+						<label for="email-body">Body</label>
+						<textarea id="email-body" bind:value={emailBody} rows="10"></textarea>
+					</div>
 				</div>
 
-				<div class="form-row">
-					<label for="sender-name">Your Name</label>
-					<input
-						id="sender-name"
-						type="text"
-						bind:value={senderName}
-						placeholder="e.g. Liam Nicholson"
-						onchange={onTemplateChange}
-					/>
-				</div>
-
-				<div class="form-row">
-					<label for="template-select">Template</label>
-					<select id="template-select" bind:value={selectedTemplate} onchange={onTemplateChange}>
-						{#each EMAIL_TEMPLATES as tmpl}
-							<option value={tmpl}>{tmpl.label}</option>
-						{/each}
-					</select>
-				</div>
-
-				<div class="form-row">
-					<label for="extra-context">Context for AI <span class="optional">(optional)</span></label>
-					<input
-						id="extra-context"
-						type="text"
-						bind:value={extraContext}
-						placeholder="e.g. they have 50 reviews but no website in rural Montana"
-					/>
-				</div>
-
-				<div class="ai-row">
-					<button class="generate-btn" onclick={handleGenerate} disabled={generating}>
-						{generating ? 'Generating…' : '✦ Generate with AI'}
+				<div class="modal-footer">
+					<button class="cancel-btn" onclick={() => (emailModalOpen = false)}>Cancel</button>
+					<button
+						class="save-btn"
+						onclick={handleOpenEmail}
+						disabled={!emailSubject.trim() || !emailBody.trim()}
+					>
+						Open in Proton Mail
 					</button>
-					{#if generateError}
-						<span class="error-msg">{generateError} — you can still edit manually below.</span>
+				</div>
+			{:else}
+				<div class="modal-body confirm-body">
+					<p class="confirm-msg">Proton Mail should have opened with your email pre-filled. Did you send it?</p>
+					{#if lead.status === 'cold'}
+						<div class="form-row checkbox-row">
+							<label>
+								<input type="checkbox" bind:checked={markContacted} />
+								Mark lead as "contacted"
+							</label>
+						</div>
+					{/if}
+					{#if logMsg}
+						<span class="save-msg">{logMsg}</span>
 					{/if}
 				</div>
 
-				<div class="form-row">
-					<label for="email-subject">Subject</label>
-					<input id="email-subject" type="text" bind:value={emailSubject} />
+				<div class="modal-footer">
+					<button class="cancel-btn" onclick={() => (emailModalOpen = false)} disabled={logging}>
+						No, close
+					</button>
+					<button class="save-btn" onclick={handleLogEmail} disabled={logging}>
+						{logging ? 'Saving…' : 'Yes, log it'}
+					</button>
 				</div>
-
-				<div class="form-row">
-					<label for="email-body">Body</label>
-					<textarea id="email-body" bind:value={emailBody} rows="10"></textarea>
-				</div>
-
-				{#if lead.status === 'cold'}
-					<div class="form-row checkbox-row">
-						<label>
-							<input type="checkbox" bind:checked={markContacted} />
-							Mark lead as "contacted" after sending
-						</label>
-					</div>
-				{/if}
-			</div>
-
-			<div class="modal-footer">
-				{#if sendSuccess}
-					<span class="save-msg">Email sent!</span>
-				{/if}
-				{#if sendError}
-					<span class="error-msg">{sendError}</span>
-				{/if}
-				<button class="cancel-btn" onclick={() => (emailModalOpen = false)} disabled={sending}>
-					Cancel
-				</button>
-				<button
-					class="save-btn"
-					onclick={handleSendEmail}
-					disabled={sending || !emailSubject.trim() || !emailBody.trim()}
-				>
-					{sending ? 'Sending…' : 'Send Email'}
-				</button>
-			</div>
+			{/if}
 		</div>
 	</div>
 {/if}
@@ -929,5 +946,17 @@
 		font-size: 0.8rem;
 		color: #f87171;
 		flex: 1;
+	}
+
+	.confirm-body {
+		justify-content: center;
+		gap: 1.25rem;
+	}
+
+	.confirm-msg {
+		font-size: 0.95rem;
+		color: #cbd5e1;
+		line-height: 1.6;
+		margin: 0;
 	}
 </style>
