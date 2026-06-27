@@ -1,0 +1,206 @@
+import { GOOGLE_PLACES_API_KEY } from '$env/static/private';
+import { db } from './db.js';
+import { isSocialMediaUrl } from './utils.js';
+
+const PLACES_SEARCH_URL = 'https://maps.googleapis.com/maps/api/place/textsearch/json';
+const PLACES_NEARBY_URL = 'https://maps.googleapis.com/maps/api/place/nearbysearch/json';
+const PLACES_DETAIL_URL = 'https://maps.googleapis.com/maps/api/place/details/json';
+const DETAIL_FIELDS = 'name,formatted_address,formatted_phone_number,website,rating,user_ratings_total';
+
+export class Semaphore {
+	private queue: Array<() => void> = [];
+	constructor(private permits: number) {}
+	async acquire(): Promise<void> {
+		if (this.permits > 0) {
+			this.permits--;
+			return;
+		}
+		await new Promise<void>((resolve) => this.queue.push(resolve));
+	}
+	release(): void {
+		const next = this.queue.shift();
+		if (next) next();
+		else this.permits++;
+	}
+}
+
+async function getWithBackoff(
+	url: string,
+	params: Record<string, string | number>,
+	maxRetries = 5
+): Promise<Record<string, unknown>> {
+	const qs = new URLSearchParams(
+		Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)]))
+	).toString();
+	for (let attempt = 0; attempt < maxRetries; attempt++) {
+		const resp = await fetch(`${url}?${qs}`);
+		if (resp.status === 429) {
+			const wait = 2 ** attempt * 1000 + Math.random() * 1000;
+			await new Promise((r) => setTimeout(r, wait));
+			continue;
+		}
+		if (!resp.ok) throw new Error(`Places API error: ${resp.status} ${resp.statusText}`);
+		return resp.json();
+	}
+	throw new Error('Google Places API rate limit exceeded after retries');
+}
+
+async function fetchNearbyPage(
+	apiKey: string,
+	category: string,
+	lat: number,
+	lng: number,
+	nextPageToken: string | null
+): Promise<Record<string, unknown>> {
+	if (nextPageToken) {
+		for (let i = 0; i < 8; i++) {
+			await new Promise((r) => setTimeout(r, 3000));
+			const data = await getWithBackoff(PLACES_NEARBY_URL, {
+				pagetoken: nextPageToken,
+				key: apiKey
+			});
+			if (data.status !== 'INVALID_REQUEST') return data;
+		}
+		throw new Error('Places API page token never became valid');
+	}
+	return getWithBackoff(PLACES_NEARBY_URL, {
+		location: `${lat},${lng}`,
+		radius: 50000,
+		keyword: category,
+		key: apiKey
+	});
+}
+
+async function upsertPlace(place: Record<string, unknown>, apiKey: string): Promise<boolean> {
+	const placeId = place.place_id as string | undefined;
+	if (!placeId) return false;
+
+	const detailData = await getWithBackoff(PLACES_DETAIL_URL, {
+		place_id: placeId,
+		fields: DETAIL_FIELDS,
+		key: apiKey
+	});
+	const detail = (detailData.result as Record<string, unknown>) ?? {};
+
+	let website = (detail.website as string) || (place.website as string) || null;
+	if (isSocialMediaUrl(website)) website = null;
+	const hasWebsite = Boolean(website);
+	const hasHttps = website ? website.startsWith('https://') : false;
+
+	const location = (place.geometry as Record<string, unknown>)?.location as
+		| Record<string, number>
+		| undefined;
+
+	const now = new Date().toISOString();
+	const lead: Record<string, unknown> = {
+		business_name:
+			(detail.name as string) || (place.name as string) || '',
+		address:
+			(detail.formatted_address as string) || (place.formatted_address as string) || '',
+		phone: (detail.formatted_phone_number as string) || '',
+		website_url: website,
+		google_place_id: placeId,
+		google_rating: (detail.rating as number) || (place.rating as number) || 0,
+		review_count:
+			(detail.user_ratings_total as number) || (place.user_ratings_total as number) || 0,
+		has_gbp: true,
+		has_website: hasWebsite,
+		has_https: hasHttps,
+		latitude: location?.lat ?? null,
+		longitude: location?.lng ?? null,
+		status: 'cold',
+		last_updated: now
+	};
+
+	const existing = await db.from('leads').select('id').eq('google_place_id', placeId);
+	if (existing.data?.length) {
+		await db.from('leads').update(lead).eq('google_place_id', placeId);
+	} else {
+		lead.created_at = now;
+		await db.from('leads').insert(lead);
+	}
+	return true;
+}
+
+export async function runScrape(
+	category: string,
+	city: string,
+	target: number
+): Promise<{ upserted: number; category: string; city: string; pages_fetched: number }> {
+	const apiKey = GOOGLE_PLACES_API_KEY;
+	if (!apiKey) throw new Error('GOOGLE_PLACES_API_KEY not configured');
+
+	const safeTarget = Math.max(1, target);
+	let upserted = 0;
+	let pagesFetched = 0;
+	let cityLat: number | null = null;
+	let cityLng: number | null = null;
+
+	const sem = new Semaphore(8);
+
+	const upsertSafe = async (place: Record<string, unknown>): Promise<boolean> => {
+		await sem.acquire();
+		try {
+			return await upsertPlace(place, apiKey);
+		} finally {
+			sem.release();
+		}
+	};
+
+	const searchData = await getWithBackoff(PLACES_SEARCH_URL, {
+		query: `${category} in ${city}`,
+		key: apiKey
+	});
+
+	const status = searchData.status as string;
+	if (status !== 'OK' && status !== 'ZERO_RESULTS') {
+		throw new Error(`Places API error: ${status}`);
+	}
+
+	pagesFetched++;
+	const places = (searchData.results as Array<Record<string, unknown>>) ?? [];
+
+	if (places.length) {
+		const loc = (places[0].geometry as Record<string, unknown>)?.location as
+			| Record<string, number>
+			| undefined;
+		cityLat = loc?.lat ?? null;
+		cityLng = loc?.lng ?? null;
+	}
+
+	const batch = places.slice(0, safeTarget);
+	const results = await Promise.all(batch.map(upsertSafe));
+	upserted += results.filter(Boolean).length;
+
+	if (upserted < safeTarget && cityLat !== null) {
+		let nextPageToken: string | null = null;
+		let firstNearby = true;
+
+		while (upserted < safeTarget) {
+			const nearbyData = await fetchNearbyPage(
+				apiKey,
+				category,
+				cityLat,
+				cityLng!,
+				firstNearby ? null : nextPageToken
+			);
+			firstNearby = false;
+
+			const nearbyStatus = nearbyData.status as string;
+			if (nearbyStatus !== 'OK' && nearbyStatus !== 'ZERO_RESULTS') {
+				throw new Error(`Places API error: ${nearbyStatus}`);
+			}
+
+			pagesFetched++;
+			const nearbyPlaces = (nearbyData.results as Array<Record<string, unknown>>) ?? [];
+			const nearbyBatch = nearbyPlaces.slice(0, safeTarget - upserted);
+			const nearbyResults = await Promise.all(nearbyBatch.map(upsertSafe));
+			upserted += nearbyResults.filter(Boolean).length;
+
+			nextPageToken = (nearbyData.next_page_token as string) ?? null;
+			if (!nextPageToken) break;
+		}
+	}
+
+	return { upserted, category, city, pages_fetched: pagesFetched };
+}
