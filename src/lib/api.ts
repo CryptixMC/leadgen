@@ -133,3 +133,48 @@ export async function triggerScrape(
 	if (!res.ok) throw new Error(`Scrape failed: ${res.statusText}`);
 	return res.json();
 }
+
+export async function sendLeadEmail(
+	id: string,
+	payload: { subject: string; emailBody: string; markContacted: boolean }
+): Promise<Lead> {
+	const res = await fetch(`${BASE}/leads/${id}/send-email`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(payload)
+	});
+	if (!res.ok) {
+		const detail = await res.text().catch(() => res.statusText);
+		throw new Error(`Send failed: ${detail}`);
+	}
+	return res.json();
+}
+
+export interface GenerateEmailRequest {
+	templateSubject: string;
+	templateBody: string;
+	senderName: string;
+	extraContext?: string;
+}
+
+export interface GeneratedEmail {
+	subject: string;
+	body: string;
+}
+
+export async function generateEmail(
+	id: string,
+	payload: GenerateEmailRequest
+): Promise<GeneratedEmail> {
+	const res = await fetch(`${BASE}/leads/${id}/generate-email`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(payload)
+	});
+	if (!res.ok) {
+		const detail = await res.text().catch(() => res.statusText);
+		throw new Error(`AI generation failed: ${detail}`);
+	}
+	return res.json();
+}
+

@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import type { PageData } from './$types';
-	import { updateLead, deleteLead, enrichLead, type Lead } from '$lib/api';
+	import { updateLead, deleteLead, enrichLead, generateEmail, sendLeadEmail, type Lead } from '$lib/api';
+	import { EMAIL_TEMPLATES, fillTemplate, type EmailTemplate } from '$lib/emailTemplates';
 	import { goto } from '$app/navigation';
 
 	let { data }: { data: PageData } = $props();
@@ -79,6 +80,90 @@
 		}
 	}
 
+	// --- Email compose state ---
+	let emailModalOpen = $state(false);
+	let selectedTemplate = $state<EmailTemplate>(EMAIL_TEMPLATES[0]);
+	let senderName = $state('');
+	let extraContext = $state('');
+	let emailSubject = $state('');
+	let emailBody = $state('');
+	let generating = $state(false);
+	let generateError = $state('');
+	let sending = $state(false);
+	let sendError = $state('');
+	let sendSuccess = $state(false);
+	let markContacted = $state(false);
+
+	const defaultTemplate = $derived(
+		EMAIL_TEMPLATES.find((t) => t.condition?.(lead)) ?? EMAIL_TEMPLATES[2]
+	);
+
+	function getTemplateVars() {
+		const city = (lead.address ?? '').split(',')[1]?.trim() ?? '';
+		return { business_name: lead.business_name, city, sender_name: senderName };
+	}
+
+	function openEmailModal() {
+		selectedTemplate = defaultTemplate;
+		markContacted = lead.status === 'cold';
+		generateError = '';
+		sendError = '';
+		sendSuccess = false;
+		const vars = getTemplateVars();
+		emailSubject = fillTemplate(selectedTemplate.subject, vars);
+		emailBody = fillTemplate(selectedTemplate.body, vars);
+		emailModalOpen = true;
+	}
+
+	function onTemplateChange() {
+		const vars = getTemplateVars();
+		emailSubject = fillTemplate(selectedTemplate.subject, vars);
+		emailBody = fillTemplate(selectedTemplate.body, vars);
+		generateError = '';
+	}
+
+	async function handleGenerate() {
+		generating = true;
+		generateError = '';
+		try {
+			const result = await generateEmail(lead.id, {
+				templateSubject: emailSubject,
+				templateBody: emailBody,
+				senderName: senderName || 'Your Name',
+				extraContext
+			});
+			emailSubject = result.subject;
+			emailBody = result.body;
+		} catch (e) {
+			generateError = e instanceof Error ? e.message : 'AI generation failed.';
+		} finally {
+			generating = false;
+		}
+	}
+
+	async function handleSendEmail() {
+		sending = true;
+		sendError = '';
+		try {
+			const updated = await sendLeadEmail(lead.id, {
+				subject: emailSubject,
+				emailBody,
+				markContacted
+			});
+			lead = updated;
+			notes = updated.notes ?? '';
+			sendSuccess = true;
+			setTimeout(() => {
+				emailModalOpen = false;
+				sendSuccess = false;
+			}, 1800);
+		} catch (e) {
+			sendError = e instanceof Error ? e.message : 'Failed to send email.';
+		} finally {
+			sending = false;
+		}
+	}
+
 	function scoreColor(s: number | null) {
 		if (s === null) return '#64748b';
 		if (s >= 60) return '#d946ef';
@@ -106,6 +191,9 @@
 			<button class="enrich-btn" onclick={handleEnrich} disabled={enriching}>
 				{enriching ? 'Enriching… (30s)' : 'Enrich Lead'}
 			</button>
+			{#if lead.email}
+				<button class="email-btn" onclick={openEmailModal}>Send Email</button>
+			{/if}
 			<button
 				class="delete-btn"
 				class:confirm={confirmDelete}
@@ -269,6 +357,114 @@
 		</div>
 	</section>
 </main>
+
+{#if emailModalOpen}
+	<div
+		class="modal-backdrop"
+		onclick={() => (emailModalOpen = false)}
+		role="presentation"
+		onkeydown={(e) => e.key === 'Escape' && (emailModalOpen = false)}
+	>
+		<div
+			class="modal"
+			onclick={(e) => e.stopPropagation()}
+			onkeydown={(e) => e.stopPropagation()}
+			role="dialog"
+			aria-modal="true"
+			aria-label="Compose Email"
+			tabindex="-1"
+		>
+			<div class="modal-header">
+				<h2>Send Email to {lead.business_name}</h2>
+				<button class="modal-close" onclick={() => (emailModalOpen = false)} aria-label="Close">✕</button>
+			</div>
+
+			<div class="modal-body">
+				<div class="form-row">
+					<span class="field-label">To</span>
+					<div class="static-field">{lead.email}</div>
+				</div>
+
+				<div class="form-row">
+					<label for="sender-name">Your Name</label>
+					<input
+						id="sender-name"
+						type="text"
+						bind:value={senderName}
+						placeholder="e.g. Liam Nicholson"
+						onchange={onTemplateChange}
+					/>
+				</div>
+
+				<div class="form-row">
+					<label for="template-select">Template</label>
+					<select id="template-select" bind:value={selectedTemplate} onchange={onTemplateChange}>
+						{#each EMAIL_TEMPLATES as tmpl}
+							<option value={tmpl}>{tmpl.label}</option>
+						{/each}
+					</select>
+				</div>
+
+				<div class="form-row">
+					<label for="extra-context">Context for AI <span class="optional">(optional)</span></label>
+					<input
+						id="extra-context"
+						type="text"
+						bind:value={extraContext}
+						placeholder="e.g. they have 50 reviews but no website in rural Montana"
+					/>
+				</div>
+
+				<div class="ai-row">
+					<button class="generate-btn" onclick={handleGenerate} disabled={generating}>
+						{generating ? 'Generating…' : '✦ Generate with AI'}
+					</button>
+					{#if generateError}
+						<span class="error-msg">{generateError} — you can still edit manually below.</span>
+					{/if}
+				</div>
+
+				<div class="form-row">
+					<label for="email-subject">Subject</label>
+					<input id="email-subject" type="text" bind:value={emailSubject} />
+				</div>
+
+				<div class="form-row">
+					<label for="email-body">Body</label>
+					<textarea id="email-body" bind:value={emailBody} rows="10"></textarea>
+				</div>
+
+				{#if lead.status === 'cold'}
+					<div class="form-row checkbox-row">
+						<label>
+							<input type="checkbox" bind:checked={markContacted} />
+							Mark lead as "contacted" after sending
+						</label>
+					</div>
+				{/if}
+			</div>
+
+			<div class="modal-footer">
+				{#if sendSuccess}
+					<span class="save-msg">Email sent!</span>
+				{/if}
+				{#if sendError}
+					<span class="error-msg">{sendError}</span>
+				{/if}
+				<button class="cancel-btn" onclick={() => (emailModalOpen = false)} disabled={sending}>
+					Cancel
+				</button>
+				<button
+					class="save-btn"
+					onclick={handleSendEmail}
+					disabled={sending || !emailSubject.trim() || !emailBody.trim()}
+				>
+					{sending ? 'Sending…' : 'Send Email'}
+				</button>
+			</div>
+		</div>
+	</div>
+{/if}
 
 <style>
 	main {
@@ -529,4 +725,210 @@
 		border-radius: 4px;
 		padding: 0.2rem 0.5rem;
 	}
+
+	.email-btn {
+		background: #0f4c75;
+		border: none;
+		color: #e2e8f0;
+		padding: 0.35rem 0.85rem;
+		border-radius: 6px;
+		cursor: pointer;
+		font-size: 0.8rem;
+		font-weight: 500;
+		transition: background 0.15s;
+	}
+
+	.email-btn:hover {
+		background: #1a6fa8;
+	}
+
+	.modal-backdrop {
+		position: fixed;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.75);
+		z-index: 50;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 1rem;
+	}
+
+	.modal {
+		background: #10101a;
+		border: 1px solid #2a2a3e;
+		border-radius: 12px;
+		width: 100%;
+		max-width: 640px;
+		max-height: 90vh;
+		display: flex;
+		flex-direction: column;
+		box-shadow: 0 25px 50px rgba(0, 0, 0, 0.6);
+	}
+
+	.modal-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding: 1.25rem 1.5rem;
+		border-bottom: 1px solid #1a1a2e;
+	}
+
+	.modal-header h2 {
+		font-size: 0.85rem;
+		color: #94a3b8;
+		text-transform: none;
+		letter-spacing: 0;
+		margin: 0;
+	}
+
+	.modal-close {
+		background: none;
+		border: none;
+		color: #64748b;
+		cursor: pointer;
+		font-size: 1rem;
+		line-height: 1;
+		padding: 0.25rem;
+	}
+
+	.modal-close:hover {
+		color: #e2e8f0;
+	}
+
+	.modal-body {
+		padding: 1.25rem 1.5rem;
+		overflow-y: auto;
+		display: flex;
+		flex-direction: column;
+		gap: 0.85rem;
+		flex: 1;
+	}
+
+	.form-row {
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+	}
+
+	.form-row label,
+	.field-label {
+		font-size: 0.75rem;
+		color: #64748b;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+	}
+
+	.optional {
+		text-transform: none;
+		letter-spacing: 0;
+		color: #475569;
+	}
+
+	.form-row input[type='text'],
+	.form-row select,
+	.form-row textarea {
+		background: #13131f;
+		border: 1px solid #2a2a3e;
+		color: #e2e8f0;
+		padding: 0.5rem 0.75rem;
+		border-radius: 6px;
+		outline: none;
+		width: 100%;
+		font-family: inherit;
+		font-size: 0.875rem;
+	}
+
+	.form-row input[type='text']:focus,
+	.form-row select:focus,
+	.form-row textarea:focus {
+		border-color: #7c3aed;
+	}
+
+	.form-row textarea {
+		resize: vertical;
+		line-height: 1.6;
+	}
+
+	.static-field {
+		font-size: 0.875rem;
+		color: #7c3aed;
+		padding: 0.3rem 0;
+	}
+
+	.checkbox-row label {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		font-size: 0.85rem;
+		color: #94a3b8;
+		text-transform: none;
+		letter-spacing: 0;
+		cursor: pointer;
+	}
+
+	.ai-row {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		flex-wrap: wrap;
+	}
+
+	.generate-btn {
+		background: #312e81;
+		border: 1px solid #4338ca;
+		color: #c7d2fe;
+		padding: 0.4rem 1rem;
+		border-radius: 6px;
+		cursor: pointer;
+		font-size: 0.8rem;
+		font-weight: 500;
+		transition: background 0.15s;
+		white-space: nowrap;
+	}
+
+	.generate-btn:hover:not(:disabled) {
+		background: #3730a3;
+	}
+
+	.generate-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.modal-footer {
+		padding: 1rem 1.5rem;
+		border-top: 1px solid #1a1a2e;
+		display: flex;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 0.75rem;
+		flex-wrap: wrap;
+	}
+
+	.cancel-btn {
+		background: transparent;
+		border: 1px solid #2a2a3e;
+		color: #94a3b8;
+		padding: 0.45rem 1rem;
+		border-radius: 6px;
+		cursor: pointer;
+		font-size: 0.875rem;
+	}
+
+	.cancel-btn:hover:not(:disabled) {
+		border-color: #4a5568;
+		color: #e2e8f0;
+	}
+
+	.cancel-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.error-msg {
+		font-size: 0.8rem;
+		color: #f87171;
+		flex: 1;
+	}
+
 </style>
