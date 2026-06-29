@@ -1,4 +1,4 @@
-import { error } from '@sveltejs/kit';
+import { error, redirect, fail } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
 import { requireAuth } from '$lib/server/auth';
 import type { PageServerLoad, Actions } from './$types';
@@ -40,5 +40,12 @@ export const actions: Actions = {
 
 		if (err) return { success: false, error: err.message };
 		return { success: true };
+	},
+
+	delete: async ({ locals, params }) => {
+		requireAuth(locals);
+		const { error: err } = await db.from('clients').delete().eq('id', params.id);
+		if (err) return fail(500, { error: err.message });
+		throw redirect(303, '/clients');
 	}
 };

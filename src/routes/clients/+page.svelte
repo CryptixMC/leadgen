@@ -125,114 +125,91 @@
 	table {
 		width: 100%;
 		border-collapse: collapse;
-		font-size: 0.875rem;
 	}
 
-	thead th {
+	thead tr {
 		background: #10101a;
+	}
+
+	th {
+		text-align: left;
+		font-size: 0.72rem;
 		color: #64748b;
-		font-weight: 600;
-		font-size: 0.75rem;
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
-		padding: 0.75rem 1rem;
-		text-align: left;
-		white-space: nowrap;
+		font-weight: 600;
+		padding: 0.65rem 1rem;
 	}
 
-	thead th.num {
+	th.num {
 		text-align: right;
-	}
-
-	tbody tr {
-		border-top: 1px solid #1a1a2e;
-		cursor: pointer;
-		transition: background 0.1s;
-	}
-
-	tbody tr:hover {
-		background: #13131f;
 	}
 
 	td {
 		padding: 0.75rem 1rem;
-		vertical-align: middle;
+		font-size: 0.9rem;
+		border-top: 1px solid #1a1a2e;
+		color: #94a3b8;
+	}
+
+	tr:hover td {
+		background: #10101a;
+		cursor: pointer;
 	}
 
 	.name {
+		color: #e2e8f0;
 		font-weight: 500;
-		color: #f1f5f9;
-		white-space: nowrap;
 	}
 
 	.services {
 		display: flex;
+		gap: 0.4rem;
 		flex-wrap: wrap;
-		gap: 0.3rem;
 	}
 
 	.badge {
 		display: inline-block;
-		padding: 0.2rem 0.55rem;
+		padding: 0.15rem 0.5rem;
 		border-radius: 999px;
 		font-size: 0.72rem;
 		font-weight: 600;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
-		white-space: nowrap;
 	}
 
-	.badge-website {
-		background: #1e2a4a;
-		color: #60a5fa;
-	}
+	.badge-website { background: #1e1b4b; color: #818cf8; }
+	.badge-tools   { background: #3b0764; color: #d946ef; }
+	.badge-hosting { background: #14291a; color: #4ade80; }
 
-	.badge-tools {
-		background: #2a1a4e;
-		color: #a78bfa;
-	}
+	.none { color: #2a2a3e; }
 
-	.badge-hosting {
-		background: #14291a;
-		color: #4ade80;
-	}
-
-	.num {
-		text-align: right;
-	}
+	.num { text-align: right; }
 
 	.mrr-cell {
 		font-family: 'JetBrains Mono', monospace;
-		font-weight: 600;
+		font-size: 0.85rem;
 		color: #4ade80;
+		text-align: right;
 	}
 
 	.mo {
+		font-size: 0.72rem;
 		color: #64748b;
-		font-weight: 400;
-		font-size: 0.8em;
 	}
 
-	.date {
-		color: #94a3b8;
-		white-space: nowrap;
-	}
+	.date { color: #64748b; }
 
-	.none {
-		color: #4a5568;
-	}
-
-	.view-cell {
-		text-align: right;
-		white-space: nowrap;
+	.view-cell a {
+		font-size: 0.82rem;
+		color: #7c3aed;
 	}
 
 	.empty {
+		color: #64748b;
 		text-align: center;
-		color: #4a5568;
-		padding: 4rem 2rem;
+		padding: 4rem;
+		border: 1px dashed #1a1a2e;
 		border-radius: 10px;
-		border: 1px solid #1a1a2e;
-		font-size: 0.95rem;
 	}
 </style>
