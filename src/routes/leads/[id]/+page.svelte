@@ -1,11 +1,17 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
+	import { enhance } from '$app/forms';
 	import type { PageData } from './$types';
 	import { updateLead, deleteLead, enrichLead, generateEmail, sendLeadEmail, type Lead } from '$lib/api';
 	import { EMAIL_TEMPLATES, fillTemplate, type EmailTemplate } from '$lib/emailTemplates';
 	import { goto } from '$app/navigation';
 
+	type ContactEvent = { id: string; type: string; notes: string | null; created_at: string };
+
 	let { data }: { data: PageData } = $props();
+
+	let activityType = $state<'email' | 'call' | 'visit' | 'note'>('call');
+	let activitySubmitting = $state(false);
 
 	let lead = $state<Lead>(untrack(() => data.lead));
 	let notes = $state(untrack(() => lead.notes ?? ''));
@@ -176,6 +182,18 @@
 		if (s >= 70) return '#4ade80';
 		if (s >= 50) return '#facc15';
 		return '#f87171';
+	}
+
+	function fmtEventDate(iso: string): string {
+		const d = new Date(iso);
+		const now = new Date();
+		const todayStr = now.toDateString();
+		const yest = new Date(now); yest.setDate(now.getDate() - 1);
+		if (d.toDateString() === todayStr) return 'Today';
+		if (d.toDateString() === yest.toDateString()) return 'Yesterday';
+		const month = d.toLocaleString('en', { month: 'short' });
+		const day = d.getDate();
+		return d.getFullYear() === now.getFullYear() ? `${month} ${day}` : `${month} ${day}, ${d.getFullYear()}`;
 	}
 </script>
 
@@ -355,6 +373,62 @@
 				{saving ? 'Saving…' : 'Save Notes'}
 			</button>
 		</div>
+	</section>
+
+	<!-- Activity Log -->
+	<section class="card activity-card">
+		<h2>Activity</h2>
+
+		<form
+			method="POST"
+			action="?/log_activity"
+			use:enhance={() => {
+				activitySubmitting = true;
+				return async ({ update }) => {
+					await update();
+					activitySubmitting = false;
+				};
+			}}
+			class="activity-form"
+		>
+			<div class="type-group">
+				{#each [['call', 'Call'], ['email', 'Email'], ['visit', 'Visit'], ['note', 'Note']] as [val, label]}
+					<button
+						type="button"
+						class="type-btn"
+						class:active={activityType === val}
+						onclick={() => (activityType = val as typeof activityType)}
+					>{label}</button>
+				{/each}
+			</div>
+			<input type="hidden" name="type" value={activityType} />
+			<textarea
+				name="notes"
+				rows="2"
+				placeholder="Notes{activityType === 'note' ? ' (required)' : ' (optional)'}…"
+				required={activityType === 'note'}
+				class="activity-notes"
+			></textarea>
+			<button type="submit" class="log-btn" disabled={activitySubmitting}>
+				{activitySubmitting ? 'Logging…' : 'Log'}
+			</button>
+		</form>
+
+		{#if !data.events || data.events.length === 0}
+			<p class="empty-state">No activity logged yet.</p>
+		{:else}
+			<ul class="event-list">
+				{#each data.events as ev}
+					<li class="event-item" data-type={ev.type}>
+						<span class="event-badge" data-type={ev.type}>{ev.type}</span>
+						<span class="event-body">
+							{#if ev.notes}<span class="event-notes">{ev.notes}</span>{/if}
+						</span>
+						<span class="event-date">{fmtEventDate(ev.created_at)}</span>
+					</li>
+				{/each}
+			</ul>
+		{/if}
 	</section>
 </main>
 
@@ -929,6 +1003,147 @@
 		font-size: 0.8rem;
 		color: #f87171;
 		flex: 1;
+	}
+
+	/* Activity Log */
+	.activity-card {
+		margin-top: 1.5rem;
+	}
+
+	.activity-form {
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+		margin-bottom: 1.25rem;
+	}
+
+	.type-group {
+		display: flex;
+		gap: 0.375rem;
+	}
+
+	.type-btn {
+		background: #10101a;
+		border: 1px solid #2a2a3e;
+		color: #94a3b8;
+		padding: 0.35rem 0.85rem;
+		border-radius: 6px;
+		font-size: 0.8rem;
+		cursor: pointer;
+		font-family: inherit;
+		transition: border-color 0.15s, color 0.15s;
+	}
+
+	.type-btn:hover {
+		border-color: #4a4a6e;
+		color: #e2e8f0;
+	}
+
+	.type-btn.active {
+		border-color: #7c3aed;
+		color: #f1f5f9;
+		background: rgba(124, 58, 237, 0.12);
+	}
+
+	.activity-notes {
+		background: #13131f;
+		border: 1px solid #2a2a3e;
+		border-radius: 6px;
+		color: #e2e8f0;
+		font-family: inherit;
+		font-size: 0.875rem;
+		padding: 0.5rem 0.75rem;
+		resize: vertical;
+		width: 100%;
+		box-sizing: border-box;
+	}
+
+	.activity-notes:focus {
+		outline: none;
+		border-color: #7c3aed;
+	}
+
+	.log-btn {
+		align-self: flex-end;
+		background: #7c3aed;
+		border: none;
+		border-radius: 6px;
+		color: #fff;
+		cursor: pointer;
+		font-family: inherit;
+		font-size: 0.875rem;
+		padding: 0.45rem 1.25rem;
+	}
+
+	.log-btn:hover:not(:disabled) {
+		background: #6d28d9;
+	}
+
+	.log-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.empty-state {
+		color: #64748b;
+		font-size: 0.875rem;
+		font-style: italic;
+		margin: 0;
+	}
+
+	.event-list {
+		list-style: none;
+		padding: 0;
+		margin: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.event-item {
+		display: flex;
+		align-items: baseline;
+		gap: 0.625rem;
+		padding: 0.5rem 0.75rem;
+		border-radius: 6px;
+		border-left: 3px solid;
+		background: #10101a;
+		font-size: 0.875rem;
+	}
+
+	.event-item[data-type='email'] { border-left-color: #60a5fa; }
+	.event-item[data-type='call']  { border-left-color: #4ade80; }
+	.event-item[data-type='visit'] { border-left-color: #fbbf24; }
+	.event-item[data-type='note']  { border-left-color: #7c3aed; }
+
+	.event-badge {
+		font-size: 0.7rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		padding: 0.15rem 0.4rem;
+		border-radius: 4px;
+		flex-shrink: 0;
+	}
+
+	.event-badge[data-type='email'] { background: rgba(96,165,250,0.15); color: #60a5fa; }
+	.event-badge[data-type='call']  { background: rgba(74,222,128,0.15); color: #4ade80; }
+	.event-badge[data-type='visit'] { background: rgba(251,191,36,0.15);  color: #fbbf24; }
+	.event-badge[data-type='note']  { background: rgba(124,58,237,0.15);  color: #a78bfa; }
+
+	.event-body {
+		flex: 1;
+		color: #e2e8f0;
+	}
+
+	.event-notes {
+		color: #cbd5e1;
+	}
+
+	.event-date {
+		color: #64748b;
+		font-size: 0.775rem;
+		flex-shrink: 0;
 	}
 
 </style>
