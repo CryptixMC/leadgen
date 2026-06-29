@@ -17,6 +17,7 @@
 	<a href="/" class="brand">LeadGen</a>
 	<div class="nav-links">
 		<a href="/">Leads</a>
+		<a href="/pipeline">Pipeline</a>
 		<a href="/map">Map</a>
 		<a href="/scraper">Scraper</a>
 	</div>
