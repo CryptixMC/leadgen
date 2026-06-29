@@ -16,7 +16,8 @@
 		"@supabase/supabase-js": "^2.49.8",
 		"cheerio": "^1.0.0",
 		"leaflet": "^1.9.4",
-		"nodemailer": "^9.0.1"
+		"nodemailer": "^9.0.1",
+		"pdf-lib": "^1.17.1"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-vercel": "^5.0.0",
