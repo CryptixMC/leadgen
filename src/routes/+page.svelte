@@ -2,7 +2,7 @@
 	import { invalidateAll } from '$app/navigation';
 	import type { PageData } from './$types';
 	import type { Lead } from '$lib/api';
-	import { batchDeleteLeads, createLead, enrichLead } from '$lib/api';
+	import { batchDeleteLeads, batchHideLeads, createLead, enrichLead } from '$lib/api';
 
 	let { data }: { data: PageData } = $props();
 
@@ -11,6 +11,7 @@
 	let sortAsc = $state(false);
 	let selected = $state(new Set<string>());
 	let deleting = $state(false);
+	let hiding = $state(false);
 	let enriching = $state(false);
 	let enrichProgress = $state({ done: 0, total: 0 });
 	let enrichCurrentName = $state('');
@@ -127,6 +128,21 @@
 		}
 	}
 
+	async function hideSelected() {
+		if (selected.size === 0) return;
+		if (!confirm(`Hide ${selected.size} lead${selected.size === 1 ? '' : 's'}? They won't appear in the dashboard and the scraper will skip them.`)) return;
+		hiding = true;
+		try {
+			await batchHideLeads([...selected]);
+			selected = new Set();
+			await invalidateAll();
+		} catch (err) {
+			alert(err instanceof Error ? err.message : 'Hide failed');
+		} finally {
+			hiding = false;
+		}
+	}
+
 	async function deleteSelected() {
 		if (selected.size === 0) return;
 		if (!confirm(`Delete ${selected.size} lead${selected.size === 1 ? '' : 's'}? This cannot be undone.`)) return;
@@ -188,12 +204,15 @@
 		</div>
 		<div class="right-controls">
 			{#if selected.size > 0}
-				<button class="enrich-btn" onclick={enrichSelected} disabled={enriching || deleting}>
+				<button class="enrich-btn" onclick={enrichSelected} disabled={enriching || deleting || hiding}>
 					{enriching
 						? `Enriching ${enrichProgress.done}/${enrichProgress.total}…`
 						: `Enrich ${selected.size} selected`}
 				</button>
-				<button class="delete-btn" onclick={deleteSelected} disabled={deleting || enriching}>
+				<button class="hide-btn" onclick={hideSelected} disabled={hiding || deleting || enriching}>
+					{hiding ? 'Hiding…' : `Hide ${selected.size} selected`}
+				</button>
+				<button class="delete-btn" onclick={deleteSelected} disabled={deleting || enriching || hiding}>
 					{deleting ? 'Deleting…' : `Delete ${selected.size} selected`}
 				</button>
 			{/if}
@@ -460,6 +479,28 @@
 	}
 
 	.delete-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.hide-btn {
+		background: transparent;
+		border: 1px solid #78350f;
+		color: #fbbf24;
+		padding: 0.35rem 0.75rem;
+		border-radius: 6px;
+		cursor: pointer;
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 0.8rem;
+		transition: border-color 0.15s, color 0.15s, background 0.15s;
+	}
+
+	.hide-btn:hover:not(:disabled) {
+		background: #78350f22;
+		border-color: #fbbf24;
+	}
+
+	.hide-btn:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
 	}

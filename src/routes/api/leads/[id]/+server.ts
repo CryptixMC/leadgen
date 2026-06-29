@@ -20,6 +20,7 @@ export const PATCH: RequestHandler = async ({ locals, params, request }) => {
 	const updateData: Record<string, unknown> = {};
 	if (payload.status !== undefined) updateData.status = payload.status;
 	if (payload.notes !== undefined) updateData.notes = payload.notes;
+	if (payload.hidden !== undefined) updateData.hidden = Boolean(payload.hidden);
 	if (!Object.keys(updateData).length) throw error(400, 'No updatable fields provided');
 	updateData.last_updated = new Date().toISOString();
 

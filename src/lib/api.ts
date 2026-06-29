@@ -29,6 +29,7 @@ export interface Lead {
 	latitude: number | null;
 	longitude: number | null;
 	notes: string | null;
+	hidden: boolean;
 	created_at: string | null;
 	last_updated: string | null;
 }
@@ -48,6 +49,26 @@ export async function fetchLeads(
 export async function fetchLead(id: string, fetchFn: typeof fetch = fetch): Promise<Lead> {
 	const res = await fetchFn(`${BASE}/leads/${id}`);
 	if (!res.ok) throw new Error(`Failed to fetch lead: ${res.statusText}`);
+	return res.json();
+}
+
+export async function hideLead(id: string): Promise<Lead> {
+	const res = await fetch(`${BASE}/leads/${id}`, {
+		method: 'PATCH',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ hidden: true })
+	});
+	if (!res.ok) throw new Error(`Failed to hide lead: ${res.statusText}`);
+	return res.json();
+}
+
+export async function batchHideLeads(ids: string[]): Promise<{ hidden: number }> {
+	const res = await fetch(`${BASE}/leads`, {
+		method: 'PATCH',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ids, hidden: true })
+	});
+	if (!res.ok) throw new Error(`Failed to batch hide leads: ${res.statusText}`);
 	return res.json();
 }
 
