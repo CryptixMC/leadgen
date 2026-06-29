@@ -21,6 +21,7 @@
 		<a href="/map">Map</a>
 		<a href="/scraper">Scraper</a>
 		<a href="/clients">Clients</a>
+		<a href="/analytics">Analytics</a>
 	</div>
 </nav>
 
