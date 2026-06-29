@@ -67,7 +67,7 @@ export async function generateEmail(input: GenerateEmailInput): Promise<Generate
 	if (!GEMINI_API_KEY) throw new Error('GEMINI_API_KEY is not configured');
 
 	const model = new GoogleGenerativeAI(GEMINI_API_KEY).getGenerativeModel({
-		model: 'gemini-1.5-flash',
+		model: 'gemini-2.0-flash',
 		generationConfig: {
 			temperature: 0.7,
 			maxOutputTokens: 1024,

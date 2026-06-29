@@ -134,6 +134,22 @@ export async function triggerScrape(
 	return res.json();
 }
 
+export async function sendLeadEmail(
+	id: string,
+	payload: { subject: string; emailBody: string; markContacted: boolean }
+): Promise<Lead> {
+	const res = await fetch(`${BASE}/leads/${id}/send-email`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(payload)
+	});
+	if (!res.ok) {
+		const detail = await res.text().catch(() => res.statusText);
+		throw new Error(`Send failed: ${detail}`);
+	}
+	return res.json();
+}
+
 export interface GenerateEmailRequest {
 	templateSubject: string;
 	templateBody: string;
