@@ -30,6 +30,23 @@ export const PATCH: RequestHandler = async ({ locals, params, request }) => {
 		.select()
 		.single();
 	if (err || !data) throw error(404, 'Lead not found');
+
+	if (payload.status === 'closed_won') {
+		const { data: existing } = await db
+			.from('clients')
+			.select('id')
+			.eq('lead_id', params.id)
+			.maybeSingle();
+		if (!existing) {
+			await db.from('clients').insert({
+				lead_id: data.id,
+				business_name: data.business_name,
+				phone: data.phone ?? null,
+				address: data.address ?? null
+			});
+		}
+	}
+
 	return json(data);
 };
 

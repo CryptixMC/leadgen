@@ -20,6 +20,7 @@
 		<a href="/pipeline">Pipeline</a>
 		<a href="/map">Map</a>
 		<a href="/scraper">Scraper</a>
+		<a href="/clients">Clients</a>
 	</div>
 </nav>
 

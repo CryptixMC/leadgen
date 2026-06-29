@@ -33,6 +33,24 @@ export interface Lead {
 	last_updated: string | null;
 }
 
+export interface Client {
+	id: string;
+	lead_id: string | null;
+	business_name: string;
+	contact_name: string | null;
+	phone: string | null;
+	email: string | null;
+	address: string | null;
+	service_website: boolean;
+	service_tools: boolean;
+	service_hosting: boolean;
+	mrr: number;
+	project_value: number;
+	contract_start: string | null;
+	notes: string | null;
+	created_at: string;
+}
+
 export async function fetchLeads(
 	params: { status?: string; priority?: string } = {},
 	fetchFn: typeof fetch = fetch
