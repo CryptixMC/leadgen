@@ -25,8 +25,8 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 
 	const lead: Record<string, unknown> = {
 		business_name: payload.business_name,
-		address: payload.address,
-		phone: payload.phone,
+		address: payload.address ?? null,
+		phone: payload.phone ?? null,
 		website_url: payload.website_url ?? null,
 		email: payload.email ?? null,
 		google_rating: payload.google_rating ?? 0,

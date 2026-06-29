@@ -8,6 +8,7 @@
 
 	let statusFilter = $state('');
 	let priorityFilter = $state('');
+	let searchQuery = $state('');
 	let sortAsc = $state(false);
 	let selected = $state(new Set<string>());
 	let deleting = $state(false);
@@ -46,11 +47,11 @@
 		try {
 			const payload: Record<string, unknown> = {
 				business_name: createForm.business_name.trim(),
-				address: createForm.address.trim(),
-				phone: createForm.phone.trim(),
 				google_rating: Number(createForm.google_rating) || 0,
 				review_count: Number(createForm.review_count) || 0
 			};
+			if (createForm.address.trim()) payload.address = createForm.address.trim();
+			if (createForm.phone.trim()) payload.phone = createForm.phone.trim();
 			if (createForm.website_url.trim()) payload.website_url = createForm.website_url.trim();
 			if (createForm.email.trim()) payload.email = createForm.email.trim();
 			if (createForm.notes.trim()) payload.notes = createForm.notes.trim();
@@ -71,6 +72,17 @@
 		(data.leads as Lead[])
 			.filter((l) => (statusFilter ? l.status === statusFilter : true))
 			.filter((l) => (priorityFilter ? l.priority === priorityFilter : true))
+			.filter((l) => {
+				if (!searchQuery.trim()) return true;
+				const q = searchQuery.toLowerCase();
+				return (
+					l.business_name?.toLowerCase().includes(q) ||
+					l.address?.toLowerCase().includes(q) ||
+					l.phone?.toLowerCase().includes(q) ||
+					l.email?.toLowerCase().includes(q) ||
+					l.website_url?.toLowerCase().includes(q)
+				);
+			})
 			.sort((a, b) => {
 				const as = a.lead_score ?? 0;
 				const bs = b.lead_score ?? 0;
@@ -168,6 +180,19 @@
 	</div>
 
 	<div class="controls">
+		<div class="search-wrap">
+			<span class="search-icon">⌕</span>
+			<input
+				class="search-input"
+				type="text"
+				bind:value={searchQuery}
+				placeholder="Search leads…"
+				autocomplete="off"
+			/>
+			{#if searchQuery}
+				<button class="search-clear" onclick={() => (searchQuery = '')} aria-label="Clear search">✕</button>
+			{/if}
+		</div>
 		<div class="filters">
 			<label>
 				<span>Status</span>
@@ -306,44 +331,74 @@
 	<div class="modal-backdrop" onclick={closeCreateModal} role="dialog" aria-modal="true">
 		<div class="modal" onclick={(e) => e.stopPropagation()}>
 			<div class="modal-header">
-				<h2>New Lead</h2>
+				<div class="modal-title-group">
+					<h2>New Lead</h2>
+					<span class="modal-subtitle">Only Business Name is required</span>
+				</div>
 				<button class="modal-close" onclick={closeCreateModal} aria-label="Close">✕</button>
 			</div>
 			<form onsubmit={handleCreateLead}>
-				<div class="form-grid">
-					<label class="field">
-						<span>Business Name <span class="required">*</span></span>
-						<input type="text" bind:value={createForm.business_name} required placeholder="Acme Plumbing Co." />
-					</label>
-					<label class="field">
-						<span>Phone <span class="required">*</span></span>
-						<input type="text" bind:value={createForm.phone} required placeholder="(204) 555-0100" />
-					</label>
-					<label class="field field-full">
-						<span>Address <span class="required">*</span></span>
-						<input type="text" bind:value={createForm.address} required placeholder="123 Main St, Winnipeg, MB" />
-					</label>
-					<label class="field">
-						<span>Website URL</span>
-						<input type="url" bind:value={createForm.website_url} placeholder="https://example.com" />
-					</label>
-					<label class="field">
-						<span>Email</span>
-						<input type="email" bind:value={createForm.email} placeholder="owner@example.com" />
-					</label>
-					<label class="field">
-						<span>Google Rating</span>
-						<input type="number" bind:value={createForm.google_rating} min="0" max="5" step="0.1" placeholder="4.2" />
-					</label>
-					<label class="field">
-						<span>Review Count</span>
-						<input type="number" bind:value={createForm.review_count} min="0" placeholder="47" />
-					</label>
-					<label class="field field-full">
-						<span>Notes</span>
-						<textarea bind:value={createForm.notes} rows="3" placeholder="Anything worth noting…"></textarea>
-					</label>
+				<div class="form-section">
+					<div class="form-section-label">Business</div>
+					<div class="form-grid">
+						<label class="field field-full">
+							<span>Business Name <span class="required">*</span></span>
+							<input type="text" bind:value={createForm.business_name} required placeholder="Acme Plumbing Co." />
+						</label>
+					</div>
 				</div>
+
+				<div class="form-section">
+					<div class="form-section-label">Contact <span class="optional-tag">optional</span></div>
+					<div class="form-grid">
+						<label class="field">
+							<span>Phone</span>
+							<input type="text" bind:value={createForm.phone} placeholder="(204) 555-0100" />
+						</label>
+						<label class="field">
+							<span>Email</span>
+							<input type="email" bind:value={createForm.email} placeholder="owner@example.com" />
+						</label>
+						<label class="field field-full">
+							<span>Address</span>
+							<input type="text" bind:value={createForm.address} placeholder="123 Main St, Winnipeg, MB" />
+						</label>
+					</div>
+				</div>
+
+				<div class="form-section">
+					<div class="form-section-label">Web Presence <span class="optional-tag">optional</span></div>
+					<div class="form-grid">
+						<label class="field field-full">
+							<span>Website URL</span>
+							<input type="url" bind:value={createForm.website_url} placeholder="https://example.com" />
+						</label>
+					</div>
+				</div>
+
+				<div class="form-section">
+					<div class="form-section-label">Google Stats <span class="optional-tag">optional</span></div>
+					<div class="form-grid">
+						<label class="field">
+							<span>Rating</span>
+							<input type="number" bind:value={createForm.google_rating} min="0" max="5" step="0.1" placeholder="4.2" />
+						</label>
+						<label class="field">
+							<span>Review Count</span>
+							<input type="number" bind:value={createForm.review_count} min="0" placeholder="47" />
+						</label>
+					</div>
+				</div>
+
+				<div class="form-section form-section-last">
+					<div class="form-section-label">Notes <span class="optional-tag">optional</span></div>
+					<div class="form-grid">
+						<label class="field field-full">
+							<textarea bind:value={createForm.notes} rows="3" placeholder="Anything worth noting…"></textarea>
+						</label>
+					</div>
+				</div>
+
 				{#if createError}
 					<p class="form-error">{createError}</p>
 				{/if}
@@ -708,6 +763,62 @@
 		background: #6d28d9;
 	}
 
+	/* Search */
+	.search-wrap {
+		position: relative;
+		display: flex;
+		align-items: center;
+	}
+
+	.search-icon {
+		position: absolute;
+		left: 0.55rem;
+		color: #64748b;
+		font-size: 1.1rem;
+		pointer-events: none;
+		line-height: 1;
+	}
+
+	.search-input {
+		background: #13131f;
+		border: 1px solid #2a2a3e;
+		color: #e2e8f0;
+		padding: 0.35rem 2rem 0.35rem 1.85rem;
+		border-radius: 6px;
+		font-size: 0.85rem;
+		font-family: inherit;
+		outline: none;
+		width: 220px;
+		transition: border-color 0.15s, width 0.2s;
+	}
+
+	.search-input:focus {
+		border-color: #7c3aed;
+		width: 280px;
+	}
+
+	.search-input::placeholder {
+		color: #4a5568;
+	}
+
+	.search-clear {
+		position: absolute;
+		right: 0.45rem;
+		background: transparent;
+		border: none;
+		color: #64748b;
+		cursor: pointer;
+		font-size: 0.7rem;
+		padding: 0.15rem 0.25rem;
+		border-radius: 3px;
+		line-height: 1;
+		transition: color 0.15s;
+	}
+
+	.search-clear:hover {
+		color: #e2e8f0;
+	}
+
 	/* Modal */
 	.modal-backdrop {
 		position: fixed;
@@ -723,9 +834,10 @@
 	.modal {
 		background: #10101a;
 		border: 1px solid #2a2a3e;
+		border-top: 2px solid #7c3aed;
 		border-radius: 12px;
 		width: 100%;
-		max-width: 560px;
+		max-width: 640px;
 		max-height: 90vh;
 		overflow-y: auto;
 		padding: 1.5rem;
@@ -733,15 +845,62 @@
 
 	.modal-header {
 		display: flex;
-		align-items: center;
+		align-items: flex-start;
 		justify-content: space-between;
-		margin-bottom: 1.25rem;
+		margin-bottom: 1.5rem;
+	}
+
+	.modal-title-group {
+		display: flex;
+		flex-direction: column;
+		gap: 0.2rem;
 	}
 
 	.modal-header h2 {
-		font-size: 1.1rem;
+		font-size: 1.15rem;
 		color: #f1f5f9;
 		margin: 0;
+	}
+
+	.modal-subtitle {
+		font-size: 0.75rem;
+		color: #64748b;
+	}
+
+	/* Form sections */
+	.form-section {
+		margin-bottom: 1.1rem;
+		padding-bottom: 1.1rem;
+		border-bottom: 1px solid #1a1a2e;
+	}
+
+	.form-section-last {
+		border-bottom: none;
+		margin-bottom: 0;
+		padding-bottom: 0;
+	}
+
+	.form-section-label {
+		font-size: 0.7rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.07em;
+		color: #4a5568;
+		margin-bottom: 0.6rem;
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+	}
+
+	.optional-tag {
+		font-size: 0.65rem;
+		font-weight: 400;
+		text-transform: none;
+		letter-spacing: 0;
+		color: #374151;
+		background: #1a1a2e;
+		padding: 0.1rem 0.4rem;
+		border-radius: 999px;
 	}
 
 	.modal-close {
