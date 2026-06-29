@@ -172,7 +172,13 @@ export async function generateEmail(
 		body: JSON.stringify(payload)
 	});
 	if (!res.ok) {
-		const detail = await res.text().catch(() => res.statusText);
+		let detail: string;
+		try {
+			const json = await res.json();
+			detail = json.message || json.error || res.statusText;
+		} catch {
+			detail = res.statusText;
+		}
 		throw new Error(`AI generation failed: ${detail}`);
 	}
 	return res.json();

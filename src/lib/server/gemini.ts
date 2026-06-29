@@ -63,6 +63,17 @@ ${extraContext || 'None provided.'}
 {"subject":"...","body":"..."}`;
 }
 
+function parseRetryDelayMs(err: unknown): number {
+	const msg = err instanceof Error ? err.message : String(err);
+	const match = msg.match(/retry in ([\d.]+)s/i);
+	return match ? Math.ceil(parseFloat(match[1]) * 1000) + 200 : 3000;
+}
+
+function is429(err: unknown): boolean {
+	const msg = err instanceof Error ? err.message : String(err);
+	return msg.includes('429') || msg.includes('Too Many Requests');
+}
+
 export async function generateEmail(input: GenerateEmailInput): Promise<GeneratedEmail> {
 	if (!GEMINI_API_KEY) throw new Error('GEMINI_API_KEY is not configured');
 
@@ -75,19 +86,31 @@ export async function generateEmail(input: GenerateEmailInput): Promise<Generate
 		}
 	});
 
-	const result = await model.generateContent(buildPrompt(input));
-	const text = result.response.text().trim();
+	for (let attempt = 0; attempt < 3; attempt++) {
+		try {
+			const result = await model.generateContent(buildPrompt(input));
+			const text = result.response.text().trim();
 
-	let parsed: GeneratedEmail;
-	try {
-		parsed = JSON.parse(text);
-	} catch {
-		throw new Error(`Gemini returned unexpected response: ${text.slice(0, 200)}`);
+			let parsed: GeneratedEmail;
+			try {
+				parsed = JSON.parse(text);
+			} catch {
+				throw new Error(`Gemini returned unexpected response: ${text.slice(0, 200)}`);
+			}
+
+			if (!parsed.subject || !parsed.body) {
+				throw new Error('Gemini response missing subject or body');
+			}
+
+			return { subject: parsed.subject, body: parsed.body };
+		} catch (err) {
+			if (is429(err)) {
+				if (attempt < 2) await new Promise((r) => setTimeout(r, parseRetryDelayMs(err)));
+			} else {
+				throw err;
+			}
+		}
 	}
 
-	if (!parsed.subject || !parsed.body) {
-		throw new Error('Gemini response missing subject or body');
-	}
-
-	return { subject: parsed.subject, body: parsed.body };
+	throw new Error('Gemini rate limit reached — please wait a moment and try again');
 }
