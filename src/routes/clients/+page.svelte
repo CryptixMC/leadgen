@@ -1,98 +1,82 @@
 <script lang="ts">
-	import { enhance } from '$app/forms';
-	import type { PageData, ActionData } from './$types';
+	import type { PageData } from './$types';
+	import type { Client } from '$lib/api';
 
-	let { data, form }: { data: PageData; form: ActionData } = $props();
+	let { data }: { data: PageData } = $props();
 
-	let showCreate = $state(false);
-	let creating = $state(false);
+	const clients = data.clients as Client[];
+	const total_mrr = data.total_mrr as number;
+
+	function formatMrr(val: number) {
+		return '$' + val.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+	}
+
+	function formatDate(d: string | null) {
+		if (!d) return '—';
+		return new Date(d).toLocaleDateString('en-CA');
+	}
 </script>
 
-<main>
-	<div class="header-row">
+<div class="page">
+	<div class="header">
 		<h1>Clients</h1>
-		<button class="btn-primary" onclick={() => (showCreate = !showCreate)}>
-			{showCreate ? 'Cancel' : '+ New Client'}
-		</button>
+		<div class="mrr-display">
+			<span class="mrr-label">Total MRR</span>
+			<span class="mrr-value">{formatMrr(total_mrr)}<span class="mrr-mo">/mo</span></span>
+		</div>
 	</div>
 
-	{#if showCreate}
-		<section class="card create-form">
-			<h2>New Client</h2>
-			{#if form?.error}
-				<p class="error">{form.error}</p>
-			{/if}
-			<form method="POST" action="?/create" use:enhance={() => {
-				creating = true;
-				return async ({ update }) => { creating = false; update(); };
-			}}>
-				<div class="field-grid">
-					<label>
-						<span>Name *</span>
-						<input name="name" type="text" required placeholder="Acme Corp" />
-					</label>
-					<label>
-						<span>Address *</span>
-						<input name="address" type="text" required placeholder="123 Main St, Winnipeg, MB" />
-					</label>
-					<label>
-						<span>Email</span>
-						<input name="email" type="email" placeholder="contact@acme.com" />
-					</label>
-					<label>
-						<span>Phone</span>
-						<input name="phone" type="tel" placeholder="204-555-0100" />
-					</label>
-					<label>
-						<span>Monthly Retainer ($)</span>
-						<input name="mrr" type="number" min="0" step="0.01" placeholder="0" />
-					</label>
-				</div>
-				<button type="submit" class="btn-primary" disabled={creating}>
-					{creating ? 'Creating…' : 'Create Client'}
-				</button>
-			</form>
-		</section>
-	{/if}
-
-	{#if data.clients.length === 0}
-		<p class="empty">No clients yet. Create one above.</p>
+	{#if clients.length === 0}
+		<div class="empty">No clients yet. Close a deal in the pipeline to get started.</div>
 	{:else}
-		<section class="card">
+		<div class="table-wrap">
 			<table>
 				<thead>
 					<tr>
-						<th>Name</th>
-						<th>Address</th>
-						<th>Email</th>
-						<th>Phone</th>
-						<th>MRR</th>
+						<th>Business</th>
+						<th>Services</th>
+						<th class="num">MRR</th>
+						<th>Contract Start</th>
+						<th></th>
 					</tr>
 				</thead>
 				<tbody>
-					{#each data.clients as client}
+					{#each clients as client}
 						<tr onclick={() => (window.location.href = `/clients/${client.id}`)}>
-							<td class="name-cell"><a href="/clients/{client.id}">{client.name}</a></td>
-							<td>{client.address}</td>
-							<td>{client.email ?? '—'}</td>
-							<td>{client.phone ?? '—'}</td>
-							<td>{client.mrr > 0 ? '$' + Number(client.mrr).toFixed(2) + '/mo' : '—'}</td>
+							<td class="name">{client.business_name}</td>
+							<td class="services">
+								{#if client.service_website}
+									<span class="badge badge-website">Website</span>
+								{/if}
+								{#if client.service_tools}
+									<span class="badge badge-tools">Tools</span>
+								{/if}
+								{#if client.service_hosting}
+									<span class="badge badge-hosting">Hosting</span>
+								{/if}
+								{#if !client.service_website && !client.service_tools && !client.service_hosting}
+									<span class="none">—</span>
+								{/if}
+							</td>
+							<td class="num mrr-cell">{formatMrr(client.mrr)}<span class="mo">/mo</span></td>
+							<td class="date">{formatDate(client.contract_start)}</td>
+							<td class="view-cell"><a href="/clients/{client.id}" onclick={(e) => e.stopPropagation()}>View →</a></td>
 						</tr>
 					{/each}
 				</tbody>
 			</table>
-		</section>
+		</div>
 	{/if}
-</main>
+</div>
 
 <style>
-	main {
+	.page {
 		max-width: 1100px;
-		margin: 0 auto;
-		padding: 2rem;
+		margin: 2rem auto;
+		padding: 0 1.5rem;
 	}
 
-	.header-row {
+	.header {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
@@ -100,55 +84,42 @@
 	}
 
 	h1 {
-		font-size: 1.4rem;
-		font-weight: 700;
+		font-size: 1.6rem;
+		color: #f1f5f9;
 	}
 
-	h2 {
-		font-size: 1rem;
-		font-weight: 600;
-		margin-bottom: 1rem;
-	}
-
-	.card {
-		background: #10101a;
-		border: 1px solid #1a1a2e;
-		border-radius: 10px;
-		padding: 1.5rem;
-		margin-bottom: 1.5rem;
-	}
-
-	.create-form .field-grid {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: 0.75rem;
-		margin-bottom: 1rem;
-	}
-
-	label {
+	.mrr-display {
 		display: flex;
 		flex-direction: column;
-		gap: 0.3rem;
+		align-items: flex-end;
 	}
 
-	label span {
-		font-size: 0.8rem;
+	.mrr-label {
+		font-size: 0.72rem;
 		color: #64748b;
-		font-weight: 500;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		font-weight: 600;
 	}
 
-	input {
-		background: #13131f;
-		border: 1px solid #2a2a3e;
-		color: #e2e8f0;
-		padding: 0.4rem 0.6rem;
-		border-radius: 6px;
-		outline: none;
-		transition: border-color 0.15s;
+	.mrr-value {
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 2rem;
+		font-weight: 700;
+		color: #4ade80;
+		line-height: 1.1;
 	}
 
-	input:focus {
-		border-color: #7c3aed;
+	.mrr-mo {
+		font-size: 1rem;
+		color: #64748b;
+		font-weight: 400;
+	}
+
+	.table-wrap {
+		overflow-x: auto;
+		border-radius: 10px;
+		border: 1px solid #1a1a2e;
 	}
 
 	table {
@@ -156,62 +127,89 @@
 		border-collapse: collapse;
 	}
 
-	th {
-		text-align: left;
-		font-size: 0.75rem;
-		color: #64748b;
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-		padding: 0.5rem 0.75rem;
+	thead tr {
 		background: #10101a;
 	}
 
+	th {
+		text-align: left;
+		font-size: 0.72rem;
+		color: #64748b;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		font-weight: 600;
+		padding: 0.65rem 1rem;
+	}
+
+	th.num {
+		text-align: right;
+	}
+
 	td {
-		padding: 0.65rem 0.75rem;
+		padding: 0.75rem 1rem;
 		font-size: 0.9rem;
 		border-top: 1px solid #1a1a2e;
 		color: #94a3b8;
 	}
 
-	.name-cell {
+	tr:hover td {
+		background: #10101a;
+		cursor: pointer;
+	}
+
+	.name {
 		color: #e2e8f0;
 		font-weight: 500;
 	}
 
-	tr:hover td {
-		background: #13131f;
-		cursor: pointer;
+	.services {
+		display: flex;
+		gap: 0.4rem;
+		flex-wrap: wrap;
 	}
 
-	.btn-primary {
-		background: #7c3aed;
-		border: none;
-		color: #fff;
-		padding: 0.4rem 0.9rem;
-		border-radius: 6px;
-		cursor: pointer;
+	.badge {
+		display: inline-block;
+		padding: 0.15rem 0.5rem;
+		border-radius: 999px;
+		font-size: 0.72rem;
 		font-weight: 600;
-		transition: background 0.15s;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
 	}
 
-	.btn-primary:hover:not(:disabled) {
-		background: #6d28d9;
+	.badge-website { background: #1e1b4b; color: #818cf8; }
+	.badge-tools   { background: #3b0764; color: #d946ef; }
+	.badge-hosting { background: #14291a; color: #4ade80; }
+
+	.none { color: #2a2a3e; }
+
+	.num { text-align: right; }
+
+	.mrr-cell {
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 0.85rem;
+		color: #4ade80;
+		text-align: right;
 	}
 
-	.btn-primary:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
+	.mo {
+		font-size: 0.72rem;
+		color: #64748b;
 	}
 
-	.error {
-		color: #f87171;
-		font-size: 0.875rem;
-		margin-bottom: 0.75rem;
+	.date { color: #64748b; }
+
+	.view-cell a {
+		font-size: 0.82rem;
+		color: #7c3aed;
 	}
 
 	.empty {
 		color: #64748b;
 		text-align: center;
-		padding: 3rem;
+		padding: 4rem;
+		border: 1px dashed #1a1a2e;
+		border-radius: 10px;
 	}
 </style>

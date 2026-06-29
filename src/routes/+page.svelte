@@ -2,15 +2,17 @@
 	import { invalidateAll } from '$app/navigation';
 	import type { PageData } from './$types';
 	import type { Lead } from '$lib/api';
-	import { batchDeleteLeads, createLead, enrichLead } from '$lib/api';
+	import { batchDeleteLeads, batchHideLeads, createLead, enrichLead } from '$lib/api';
 
 	let { data }: { data: PageData } = $props();
 
 	let statusFilter = $state('');
 	let priorityFilter = $state('');
+	let searchQuery = $state('');
 	let sortAsc = $state(false);
 	let selected = $state(new Set<string>());
 	let deleting = $state(false);
+	let hiding = $state(false);
 	let enriching = $state(false);
 	let enrichProgress = $state({ done: 0, total: 0 });
 	let enrichCurrentName = $state('');
@@ -46,11 +48,11 @@
 		try {
 			const payload: Record<string, unknown> = {
 				business_name: createForm.business_name.trim(),
-				address: createForm.address.trim(),
-				phone: createForm.phone.trim(),
 				google_rating: Number(createForm.google_rating) || 0,
 				review_count: Number(createForm.review_count) || 0
 			};
+			if (createForm.address.trim()) payload.address = createForm.address.trim();
+			if (createForm.phone.trim()) payload.phone = createForm.phone.trim();
 			if (createForm.website_url.trim()) payload.website_url = createForm.website_url.trim();
 			if (createForm.email.trim()) payload.email = createForm.email.trim();
 			if (createForm.notes.trim()) payload.notes = createForm.notes.trim();
@@ -71,6 +73,17 @@
 		(data.leads as Lead[])
 			.filter((l) => (statusFilter ? l.status === statusFilter : true))
 			.filter((l) => (priorityFilter ? l.priority === priorityFilter : true))
+			.filter((l) => {
+				if (!searchQuery.trim()) return true;
+				const q = searchQuery.toLowerCase();
+				return (
+					l.business_name?.toLowerCase().includes(q) ||
+					l.address?.toLowerCase().includes(q) ||
+					l.phone?.toLowerCase().includes(q) ||
+					l.email?.toLowerCase().includes(q) ||
+					l.website_url?.toLowerCase().includes(q)
+				);
+			})
 			.sort((a, b) => {
 				const as = a.lead_score ?? 0;
 				const bs = b.lead_score ?? 0;
@@ -127,6 +140,21 @@
 		}
 	}
 
+	async function hideSelected() {
+		if (selected.size === 0) return;
+		if (!confirm(`Hide ${selected.size} lead${selected.size === 1 ? '' : 's'}? They won't appear in the dashboard and the scraper will skip them.`)) return;
+		hiding = true;
+		try {
+			await batchHideLeads([...selected]);
+			selected = new Set();
+			await invalidateAll();
+		} catch (err) {
+			alert(err instanceof Error ? err.message : 'Hide failed');
+		} finally {
+			hiding = false;
+		}
+	}
+
 	async function deleteSelected() {
 		if (selected.size === 0) return;
 		if (!confirm(`Delete ${selected.size} lead${selected.size === 1 ? '' : 's'}? This cannot be undone.`)) return;
@@ -168,6 +196,19 @@
 	</div>
 
 	<div class="controls">
+		<div class="search-wrap">
+			<span class="search-icon">⌕</span>
+			<input
+				class="search-input"
+				type="text"
+				bind:value={searchQuery}
+				placeholder="Search leads…"
+				autocomplete="off"
+			/>
+			{#if searchQuery}
+				<button class="search-clear" onclick={() => (searchQuery = '')} aria-label="Clear search">✕</button>
+			{/if}
+		</div>
 		<div class="filters">
 			<label>
 				<span>Status</span>
@@ -188,12 +229,15 @@
 		</div>
 		<div class="right-controls">
 			{#if selected.size > 0}
-				<button class="enrich-btn" onclick={enrichSelected} disabled={enriching || deleting}>
+				<button class="enrich-btn" onclick={enrichSelected} disabled={enriching || deleting || hiding}>
 					{enriching
 						? `Enriching ${enrichProgress.done}/${enrichProgress.total}…`
 						: `Enrich ${selected.size} selected`}
 				</button>
-				<button class="delete-btn" onclick={deleteSelected} disabled={deleting || enriching}>
+				<button class="hide-btn" onclick={hideSelected} disabled={hiding || deleting || enriching}>
+					{hiding ? 'Hiding…' : `Hide ${selected.size} selected`}
+				</button>
+				<button class="delete-btn" onclick={deleteSelected} disabled={deleting || enriching || hiding}>
 					{deleting ? 'Deleting…' : `Delete ${selected.size} selected`}
 				</button>
 			{/if}
@@ -306,44 +350,59 @@
 	<div class="modal-backdrop" onclick={closeCreateModal} role="dialog" aria-modal="true">
 		<div class="modal" onclick={(e) => e.stopPropagation()}>
 			<div class="modal-header">
-				<h2>New Lead</h2>
+				<div class="modal-title-group">
+					<h2>New Lead</h2>
+					<span class="modal-subtitle">Only Business Name is required</span>
+				</div>
 				<button class="modal-close" onclick={closeCreateModal} aria-label="Close">✕</button>
 			</div>
 			<form onsubmit={handleCreateLead}>
 				<div class="form-grid">
-					<label class="field">
+					<!-- Row 1: Business Name spans full width -->
+					<label class="field field-full">
 						<span>Business Name <span class="required">*</span></span>
 						<input type="text" bind:value={createForm.business_name} required placeholder="Acme Plumbing Co." />
 					</label>
+
+					<!-- Row 2: Phone + Email -->
 					<label class="field">
-						<span>Phone <span class="required">*</span></span>
-						<input type="text" bind:value={createForm.phone} required placeholder="(204) 555-0100" />
-					</label>
-					<label class="field field-full">
-						<span>Address <span class="required">*</span></span>
-						<input type="text" bind:value={createForm.address} required placeholder="123 Main St, Winnipeg, MB" />
+						<span>Phone <span class="optional-hint">optional</span></span>
+						<input type="text" bind:value={createForm.phone} placeholder="(204) 555-0100" />
 					</label>
 					<label class="field">
-						<span>Website URL</span>
-						<input type="url" bind:value={createForm.website_url} placeholder="https://example.com" />
-					</label>
-					<label class="field">
-						<span>Email</span>
+						<span>Email <span class="optional-hint">optional</span></span>
 						<input type="email" bind:value={createForm.email} placeholder="owner@example.com" />
 					</label>
+
+					<!-- Row 3: Address spans full width -->
+					<label class="field field-full">
+						<span>Address <span class="optional-hint">optional</span></span>
+						<input type="text" bind:value={createForm.address} placeholder="123 Main St, Winnipeg, MB" />
+					</label>
+
+					<!-- Row 4: Website spans full width -->
+					<label class="field field-full">
+						<span>Website URL <span class="optional-hint">optional</span></span>
+						<input type="url" bind:value={createForm.website_url} placeholder="https://example.com" />
+					</label>
+
+					<!-- Row 5: Rating + Review Count -->
 					<label class="field">
-						<span>Google Rating</span>
+						<span>Google Rating <span class="optional-hint">optional</span></span>
 						<input type="number" bind:value={createForm.google_rating} min="0" max="5" step="0.1" placeholder="4.2" />
 					</label>
 					<label class="field">
-						<span>Review Count</span>
+						<span>Review Count <span class="optional-hint">optional</span></span>
 						<input type="number" bind:value={createForm.review_count} min="0" placeholder="47" />
 					</label>
+
+					<!-- Row 6: Notes spans full width -->
 					<label class="field field-full">
-						<span>Notes</span>
+						<span>Notes <span class="optional-hint">optional</span></span>
 						<textarea bind:value={createForm.notes} rows="3" placeholder="Anything worth noting…"></textarea>
 					</label>
 				</div>
+
 				{#if createError}
 					<p class="form-error">{createError}</p>
 				{/if}
@@ -460,6 +519,28 @@
 	}
 
 	.delete-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.hide-btn {
+		background: transparent;
+		border: 1px solid #78350f;
+		color: #fbbf24;
+		padding: 0.35rem 0.75rem;
+		border-radius: 6px;
+		cursor: pointer;
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 0.8rem;
+		transition: border-color 0.15s, color 0.15s, background 0.15s;
+	}
+
+	.hide-btn:hover:not(:disabled) {
+		background: #78350f22;
+		border-color: #fbbf24;
+	}
+
+	.hide-btn:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
 	}
@@ -708,6 +789,62 @@
 		background: #6d28d9;
 	}
 
+	/* Search */
+	.search-wrap {
+		position: relative;
+		display: flex;
+		align-items: center;
+	}
+
+	.search-icon {
+		position: absolute;
+		left: 0.55rem;
+		color: #64748b;
+		font-size: 1.1rem;
+		pointer-events: none;
+		line-height: 1;
+	}
+
+	.search-input {
+		background: #13131f;
+		border: 1px solid #2a2a3e;
+		color: #e2e8f0;
+		padding: 0.35rem 2rem 0.35rem 1.85rem;
+		border-radius: 6px;
+		font-size: 0.85rem;
+		font-family: inherit;
+		outline: none;
+		width: 220px;
+		transition: border-color 0.15s, width 0.2s;
+	}
+
+	.search-input:focus {
+		border-color: #7c3aed;
+		width: 280px;
+	}
+
+	.search-input::placeholder {
+		color: #4a5568;
+	}
+
+	.search-clear {
+		position: absolute;
+		right: 0.45rem;
+		background: transparent;
+		border: none;
+		color: #64748b;
+		cursor: pointer;
+		font-size: 0.7rem;
+		padding: 0.15rem 0.25rem;
+		border-radius: 3px;
+		line-height: 1;
+		transition: color 0.15s;
+	}
+
+	.search-clear:hover {
+		color: #e2e8f0;
+	}
+
 	/* Modal */
 	.modal-backdrop {
 		position: fixed;
@@ -723,9 +860,10 @@
 	.modal {
 		background: #10101a;
 		border: 1px solid #2a2a3e;
+		border-top: 2px solid #7c3aed;
 		border-radius: 12px;
 		width: 100%;
-		max-width: 560px;
+		max-width: 640px;
 		max-height: 90vh;
 		overflow-y: auto;
 		padding: 1.5rem;
@@ -733,15 +871,33 @@
 
 	.modal-header {
 		display: flex;
-		align-items: center;
+		align-items: flex-start;
 		justify-content: space-between;
-		margin-bottom: 1.25rem;
+		margin-bottom: 1.5rem;
+	}
+
+	.modal-title-group {
+		display: flex;
+		flex-direction: column;
+		gap: 0.2rem;
 	}
 
 	.modal-header h2 {
-		font-size: 1.1rem;
+		font-size: 1.15rem;
 		color: #f1f5f9;
 		margin: 0;
+	}
+
+	.modal-subtitle {
+		font-size: 0.75rem;
+		color: #64748b;
+	}
+
+	.optional-hint {
+		font-size: 0.7rem;
+		font-weight: 400;
+		color: #374151;
+		margin-left: 0.2rem;
 	}
 
 	.modal-close {
@@ -762,7 +918,7 @@
 	.form-grid {
 		display: grid;
 		grid-template-columns: 1fr 1fr;
-		gap: 0.85rem;
+		gap: 0.75rem 1rem;
 	}
 
 	.field {
@@ -782,12 +938,19 @@
 		background: #13131f;
 		border: 1px solid #2a2a3e;
 		color: #e2e8f0;
-		padding: 0.4rem 0.6rem;
+		padding: 0.5rem 0.7rem;
 		border-radius: 6px;
-		font-size: 0.85rem;
+		font-size: 0.875rem;
 		font-family: inherit;
 		outline: none;
-		transition: border-color 0.15s;
+		transition: border-color 0.15s, background 0.15s;
+		width: 100%;
+		box-sizing: border-box;
+	}
+
+	.field input:hover,
+	.field textarea:hover {
+		background: #16162a;
 	}
 
 	.field input:focus,

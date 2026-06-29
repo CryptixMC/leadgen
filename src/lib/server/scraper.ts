@@ -112,8 +112,13 @@ async function upsertPlace(place: Record<string, unknown>, apiKey: string): Prom
 		last_updated: now
 	};
 
-	const existing = await db.from('leads').select('id').eq('google_place_id', placeId);
-	if (existing.data?.length) {
+	const existing = await db
+		.from('leads')
+		.select('id, hidden')
+		.eq('google_place_id', placeId)
+		.maybeSingle();
+	if (existing.data) {
+		if (existing.data.hidden) return false;
 		await db.from('leads').update(lead).eq('google_place_id', placeId);
 	} else {
 		lead.created_at = now;

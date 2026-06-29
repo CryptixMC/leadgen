@@ -1,31 +1,44 @@
 import { error, redirect, fail } from '@sveltejs/kit';
-import type { Actions, PageServerLoad } from './$types';
 import { db } from '$lib/server/db';
 import { requireAuth } from '$lib/server/auth';
+import type { PageServerLoad, Actions } from './$types';
 
 export const load: PageServerLoad = async ({ locals, params }) => {
 	requireAuth(locals);
-	const { data, error: err } = await db.from('clients').select('*').eq('id', params.id).single();
+	const { data, error: err } = await db
+		.from('clients')
+		.select('*')
+		.eq('id', params.id)
+		.single();
 	if (err || !data) throw error(404, 'Client not found');
 	return { client: data };
 };
 
 export const actions: Actions = {
-	update: async ({ locals, params, request }) => {
+	save: async ({ locals, params, request }) => {
 		requireAuth(locals);
 		const form = await request.formData();
-		const name = (form.get('name') as string)?.trim();
-		const address = (form.get('address') as string)?.trim();
-		const email = (form.get('email') as string)?.trim() || null;
-		const phone = (form.get('phone') as string)?.trim() || null;
-		const mrr = parseFloat(form.get('mrr') as string) || 0;
-		const notes = (form.get('notes') as string)?.trim() || null;
 
-		if (!name || !address) return fail(400, { error: 'Name and address are required.' });
+		const updates = {
+			contact_name: (form.get('contact_name') as string)?.trim() || null,
+			phone: (form.get('phone') as string)?.trim() || null,
+			email: (form.get('email') as string)?.trim() || null,
+			address: (form.get('address') as string)?.trim() || null,
+			service_website: form.get('service_website') === 'on',
+			service_tools: form.get('service_tools') === 'on',
+			service_hosting: form.get('service_hosting') === 'on',
+			mrr: parseFloat((form.get('mrr') as string) || '0') || 0,
+			project_value: parseFloat((form.get('project_value') as string) || '0') || 0,
+			contract_start: (form.get('contract_start') as string) || null,
+			notes: (form.get('notes') as string)?.trim() || null
+		};
 
-		const { error: err } = await db.from('clients').update({ name, address, email, phone, mrr, notes }).eq('id', params.id);
-		if (err) return fail(500, { error: err.message });
+		const { error: err } = await db
+			.from('clients')
+			.update(updates)
+			.eq('id', params.id);
 
+		if (err) return { success: false, error: err.message };
 		return { success: true };
 	},
 

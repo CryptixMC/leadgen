@@ -9,8 +9,10 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 	let query = db.from('leads').select('*').order('lead_score', { ascending: false });
 	const status = url.searchParams.get('status');
 	const priority = url.searchParams.get('priority');
+	const includeHidden = url.searchParams.get('include_hidden') === 'true';
 	if (status) query = query.eq('status', status);
 	if (priority) query = query.eq('priority', priority);
+	if (!includeHidden) query = query.eq('hidden', false);
 	const { data, error: err } = await query;
 	if (err) throw error(500, err.message);
 	return json(data ?? []);
@@ -25,8 +27,8 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 
 	const lead: Record<string, unknown> = {
 		business_name: payload.business_name,
-		address: payload.address,
-		phone: payload.phone,
+		address: payload.address ?? null,
+		phone: payload.phone ?? null,
 		website_url: payload.website_url ?? null,
 		email: payload.email ?? null,
 		google_rating: payload.google_rating ?? 0,
@@ -47,6 +49,19 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 	const { data, error: err } = await db.from('leads').insert(lead).select().single();
 	if (err) throw error(500, err.message);
 	return json(data, { status: 201 });
+};
+
+export const PATCH: RequestHandler = async ({ locals, request }) => {
+	requireAuth(locals);
+	const { ids, hidden } = await request.json();
+	if (!ids?.length) throw error(400, 'No IDs provided');
+	const updateData: Record<string, unknown> = {};
+	if (hidden !== undefined) updateData.hidden = Boolean(hidden);
+	if (!Object.keys(updateData).length) throw error(400, 'No updatable fields provided');
+	updateData.last_updated = new Date().toISOString();
+	const { error: err } = await db.from('leads').update(updateData).in('id', ids);
+	if (err) throw error(500, err.message);
+	return json({ hidden: ids.length });
 };
 
 export const DELETE: RequestHandler = async ({ locals, request }) => {

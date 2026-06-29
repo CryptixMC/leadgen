@@ -20,6 +20,7 @@ export const PATCH: RequestHandler = async ({ locals, params, request }) => {
 	const updateData: Record<string, unknown> = {};
 	if (payload.status !== undefined) updateData.status = payload.status;
 	if (payload.notes !== undefined) updateData.notes = payload.notes;
+	if (payload.hidden !== undefined) updateData.hidden = Boolean(payload.hidden);
 	if (!Object.keys(updateData).length) throw error(400, 'No updatable fields provided');
 	updateData.last_updated = new Date().toISOString();
 
@@ -30,6 +31,23 @@ export const PATCH: RequestHandler = async ({ locals, params, request }) => {
 		.select()
 		.single();
 	if (err || !data) throw error(404, 'Lead not found');
+
+	if (payload.status === 'closed_won') {
+		const { data: existing } = await db
+			.from('clients')
+			.select('id')
+			.eq('lead_id', params.id)
+			.maybeSingle();
+		if (!existing) {
+			await db.from('clients').insert({
+				lead_id: data.id,
+				business_name: data.business_name,
+				phone: data.phone ?? null,
+				address: data.address ?? null
+			});
+		}
+	}
+
 	return json(data);
 };
 
