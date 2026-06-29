@@ -338,65 +338,50 @@
 				<button class="modal-close" onclick={closeCreateModal} aria-label="Close">✕</button>
 			</div>
 			<form onsubmit={handleCreateLead}>
-				<div class="form-section">
-					<div class="form-section-label">Business</div>
-					<div class="form-grid">
-						<label class="field field-full">
-							<span>Business Name <span class="required">*</span></span>
-							<input type="text" bind:value={createForm.business_name} required placeholder="Acme Plumbing Co." />
-						</label>
-					</div>
-				</div>
+				<div class="form-grid">
+					<!-- Row 1: Business Name spans full width -->
+					<label class="field field-full">
+						<span>Business Name <span class="required">*</span></span>
+						<input type="text" bind:value={createForm.business_name} required placeholder="Acme Plumbing Co." />
+					</label>
 
-				<div class="form-section">
-					<div class="form-section-label">Contact <span class="optional-tag">optional</span></div>
-					<div class="form-grid">
-						<label class="field">
-							<span>Phone</span>
-							<input type="text" bind:value={createForm.phone} placeholder="(204) 555-0100" />
-						</label>
-						<label class="field">
-							<span>Email</span>
-							<input type="email" bind:value={createForm.email} placeholder="owner@example.com" />
-						</label>
-						<label class="field field-full">
-							<span>Address</span>
-							<input type="text" bind:value={createForm.address} placeholder="123 Main St, Winnipeg, MB" />
-						</label>
-					</div>
-				</div>
+					<!-- Row 2: Phone + Email -->
+					<label class="field">
+						<span>Phone <span class="optional-hint">optional</span></span>
+						<input type="text" bind:value={createForm.phone} placeholder="(204) 555-0100" />
+					</label>
+					<label class="field">
+						<span>Email <span class="optional-hint">optional</span></span>
+						<input type="email" bind:value={createForm.email} placeholder="owner@example.com" />
+					</label>
 
-				<div class="form-section">
-					<div class="form-section-label">Web Presence <span class="optional-tag">optional</span></div>
-					<div class="form-grid">
-						<label class="field field-full">
-							<span>Website URL</span>
-							<input type="url" bind:value={createForm.website_url} placeholder="https://example.com" />
-						</label>
-					</div>
-				</div>
+					<!-- Row 3: Address spans full width -->
+					<label class="field field-full">
+						<span>Address <span class="optional-hint">optional</span></span>
+						<input type="text" bind:value={createForm.address} placeholder="123 Main St, Winnipeg, MB" />
+					</label>
 
-				<div class="form-section">
-					<div class="form-section-label">Google Stats <span class="optional-tag">optional</span></div>
-					<div class="form-grid">
-						<label class="field">
-							<span>Rating</span>
-							<input type="number" bind:value={createForm.google_rating} min="0" max="5" step="0.1" placeholder="4.2" />
-						</label>
-						<label class="field">
-							<span>Review Count</span>
-							<input type="number" bind:value={createForm.review_count} min="0" placeholder="47" />
-						</label>
-					</div>
-				</div>
+					<!-- Row 4: Website spans full width -->
+					<label class="field field-full">
+						<span>Website URL <span class="optional-hint">optional</span></span>
+						<input type="url" bind:value={createForm.website_url} placeholder="https://example.com" />
+					</label>
 
-				<div class="form-section form-section-last">
-					<div class="form-section-label">Notes <span class="optional-tag">optional</span></div>
-					<div class="form-grid">
-						<label class="field field-full">
-							<textarea bind:value={createForm.notes} rows="3" placeholder="Anything worth noting…"></textarea>
-						</label>
-					</div>
+					<!-- Row 5: Rating + Review Count -->
+					<label class="field">
+						<span>Google Rating <span class="optional-hint">optional</span></span>
+						<input type="number" bind:value={createForm.google_rating} min="0" max="5" step="0.1" placeholder="4.2" />
+					</label>
+					<label class="field">
+						<span>Review Count <span class="optional-hint">optional</span></span>
+						<input type="number" bind:value={createForm.review_count} min="0" placeholder="47" />
+					</label>
+
+					<!-- Row 6: Notes spans full width -->
+					<label class="field field-full">
+						<span>Notes <span class="optional-hint">optional</span></span>
+						<textarea bind:value={createForm.notes} rows="3" placeholder="Anything worth noting…"></textarea>
+					</label>
 				</div>
 
 				{#if createError}
@@ -867,40 +852,11 @@
 		color: #64748b;
 	}
 
-	/* Form sections */
-	.form-section {
-		margin-bottom: 1.1rem;
-		padding-bottom: 1.1rem;
-		border-bottom: 1px solid #1a1a2e;
-	}
-
-	.form-section-last {
-		border-bottom: none;
-		margin-bottom: 0;
-		padding-bottom: 0;
-	}
-
-	.form-section-label {
+	.optional-hint {
 		font-size: 0.7rem;
-		font-weight: 600;
-		text-transform: uppercase;
-		letter-spacing: 0.07em;
-		color: #4a5568;
-		margin-bottom: 0.6rem;
-		display: flex;
-		align-items: center;
-		gap: 0.4rem;
-	}
-
-	.optional-tag {
-		font-size: 0.65rem;
 		font-weight: 400;
-		text-transform: none;
-		letter-spacing: 0;
 		color: #374151;
-		background: #1a1a2e;
-		padding: 0.1rem 0.4rem;
-		border-radius: 999px;
+		margin-left: 0.2rem;
 	}
 
 	.modal-close {
@@ -921,7 +877,7 @@
 	.form-grid {
 		display: grid;
 		grid-template-columns: 1fr 1fr;
-		gap: 0.85rem;
+		gap: 0.75rem 1rem;
 	}
 
 	.field {
@@ -941,12 +897,19 @@
 		background: #13131f;
 		border: 1px solid #2a2a3e;
 		color: #e2e8f0;
-		padding: 0.4rem 0.6rem;
+		padding: 0.5rem 0.7rem;
 		border-radius: 6px;
-		font-size: 0.85rem;
+		font-size: 0.875rem;
 		font-family: inherit;
 		outline: none;
-		transition: border-color 0.15s;
+		transition: border-color 0.15s, background 0.15s;
+		width: 100%;
+		box-sizing: border-box;
+	}
+
+	.field input:hover,
+	.field textarea:hover {
+		background: #16162a;
 	}
 
 	.field input:focus,
