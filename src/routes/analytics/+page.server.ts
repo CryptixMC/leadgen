@@ -1,9 +1,18 @@
 import { db } from '$lib/server/db';
 import type { PageServerLoad } from './$types';
+import { DEMO_MRR_OVER_TIME, DEMO_PIPELINE_FUNNEL, DEMO_REVENUE_BY_MONTH } from '$lib/demo/data';
 
 const STATUSES = ['cold', 'contacted', 'proposal', 'closed_won', 'closed_lost'];
 
-export const load: PageServerLoad = async () => {
+export const load: PageServerLoad = async ({ locals }) => {
+	if (locals.demo) {
+		return {
+			mrrOverTime: DEMO_MRR_OVER_TIME,
+			pipelineFunnel: DEMO_PIPELINE_FUNNEL,
+			revenueByMonth: DEMO_REVENUE_BY_MONTH
+		};
+	}
+
 	const [mrrOverTime, pipelineFunnel, revenueByMonth] = await Promise.all([
 		loadMrrOverTime(),
 		loadPipelineFunnel(),

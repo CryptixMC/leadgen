@@ -5,6 +5,8 @@ import { requireAuth } from '$lib/server/auth';
 import { sendEmail } from '$lib/server/email';
 
 export const POST: RequestHandler = async ({ locals, params, request }) => {
+	if (locals.demo) return json({ ok: true });
+
 	requireAuth(locals);
 
 	const { data: lead, error: dbErr } = await db

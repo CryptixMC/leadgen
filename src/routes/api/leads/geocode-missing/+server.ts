@@ -20,6 +20,8 @@ class Semaphore {
 }
 
 export const POST: RequestHandler = async ({ locals }) => {
+	if (locals.demo) return json({ geocoded: 0 });
+
 	requireAuth(locals);
 	if (!GOOGLE_PLACES_API_KEY) throw error(500, 'GOOGLE_PLACES_API_KEY not configured');
 

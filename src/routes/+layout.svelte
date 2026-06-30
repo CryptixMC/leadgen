@@ -1,6 +1,16 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import favicon from '$lib/assets/favicon.svg';
+	import DemoBanner from '$lib/components/DemoBanner.svelte';
+	import { demoMode } from '$lib/demo/state';
+
 	let { children } = $props();
+
+	onMount(() => {
+		if (sessionStorage.getItem('demo') === '1') {
+			demoMode.set(true);
+		}
+	});
 </script>
 
 <svelte:head>
@@ -27,6 +37,8 @@
 		<a href="/analytics">Analytics</a>
 	</div>
 </nav>
+
+<DemoBanner />
 
 {@render children()}
 

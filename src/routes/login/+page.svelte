@@ -2,11 +2,17 @@
 	import { supabase } from '$lib/supabase.js';
 	import { goto } from '$app/navigation';
 	import favicon from '$lib/assets/favicon.svg';
+	import { enterDemo } from '$lib/demo/state';
 
 	let email = $state('');
 	let password = $state('');
 	let error = $state('');
 	let loading = $state(false);
+
+	function handleDemo() {
+		enterDemo();
+		goto('/pipeline');
+	}
 
 	async function handleSubmit(e: Event) {
 		e.preventDefault();
@@ -79,6 +85,10 @@
 				{loading ? 'Signing in…' : 'Sign In'}
 			</button>
 		</form>
+
+		<button type="button" class="demo-btn" onclick={handleDemo}>
+			Explore without signing in →
+		</button>
 	</div>
 </main>
 
@@ -210,5 +220,23 @@
 	button:disabled {
 		opacity: 0.45;
 		cursor: not-allowed;
+	}
+
+	.demo-btn {
+		width: 100%;
+		background: none;
+		border: 1px solid var(--border-subtle);
+		color: var(--text-muted);
+		padding: 0.6rem 1.25rem;
+		border-radius: var(--radius-pill);
+		cursor: pointer;
+		font-size: 0.85rem;
+		margin-top: 0.75rem;
+		transition: border-color var(--dur-fast), color var(--dur-fast);
+	}
+
+	.demo-btn:hover {
+		border-color: var(--border-strong);
+		color: var(--text-primary);
 	}
 </style>
