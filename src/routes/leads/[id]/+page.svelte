@@ -284,6 +284,29 @@
 						<a href={lead.yelp_url} target="_blank" rel="noopener noreferrer" class="contact-link">View on Yelp</a>
 					</dd>
 				{/if}
+				{#if lead.facebook_url || lead.instagram_url || lead.twitter_url || lead.linkedin_url || lead.tiktok_url || lead.youtube_url}
+					<dt>Social</dt>
+					<dd class="social-links">
+						{#if lead.facebook_url}
+							<a href={lead.facebook_url} target="_blank" rel="noopener noreferrer" class="contact-link">Facebook →</a>
+						{/if}
+						{#if lead.instagram_url}
+							<a href={lead.instagram_url} target="_blank" rel="noopener noreferrer" class="contact-link">Instagram →</a>
+						{/if}
+						{#if lead.twitter_url}
+							<a href={lead.twitter_url} target="_blank" rel="noopener noreferrer" class="contact-link">Twitter/X →</a>
+						{/if}
+						{#if lead.linkedin_url}
+							<a href={lead.linkedin_url} target="_blank" rel="noopener noreferrer" class="contact-link">LinkedIn →</a>
+						{/if}
+						{#if lead.tiktok_url}
+							<a href={lead.tiktok_url} target="_blank" rel="noopener noreferrer" class="contact-link">TikTok →</a>
+						{/if}
+						{#if lead.youtube_url}
+							<a href={lead.youtube_url} target="_blank" rel="noopener noreferrer" class="contact-link">YouTube →</a>
+						{/if}
+					</dd>
+				{/if}
 			</dl>
 		</section>
 
@@ -814,6 +837,12 @@
 
 	.contact-link:hover {
 		color: var(--accent-highlight);
+	}
+
+	.social-links {
+		display: flex;
+		flex-direction: column;
+		gap: 0.2rem;
 	}
 
 	.inferred-warn {
