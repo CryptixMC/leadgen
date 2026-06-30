@@ -41,52 +41,52 @@
 	/>
 </svelte:head>
 
-<nav>
-	<a href="/" class="brand">
-		<img src={favicon} alt="LN" class="brand-mark" />
-		<span class="brand-text">LeadGen.</span>
-	</a>
-	<div class="nav-links">
-		<a href="/" aria-current={$page.url.pathname === '/' ? 'page' : undefined}>Leads</a>
-		<a href="/pipeline" aria-current={$page.url.pathname === '/pipeline' ? 'page' : undefined}>Pipeline</a>
-		<a href="/map" aria-current={$page.url.pathname === '/map' ? 'page' : undefined}>Map</a>
-		<a href="/scraper" aria-current={$page.url.pathname === '/scraper' ? 'page' : undefined}>Scraper</a>
-		<a href="/clients" aria-current={$page.url.pathname === '/clients' ? 'page' : undefined}>Clients</a>
-		<a href="/analytics" aria-current={$page.url.pathname === '/analytics' ? 'page' : undefined}>Analytics</a>
-	</div>
-	{#if $page.url.pathname !== '/login'}
+{#if $page.url.pathname !== '/login'}
+	<nav>
+		<a href="/" class="brand">
+			<img src={favicon} alt="LN" class="brand-mark" />
+			<span class="brand-text">LeadGen.</span>
+		</a>
+		<div class="nav-links">
+			<a href="/" aria-current={$page.url.pathname === '/' ? 'page' : undefined}>Leads</a>
+			<a href="/pipeline" aria-current={$page.url.pathname === '/pipeline' ? 'page' : undefined}>Pipeline</a>
+			<a href="/map" aria-current={$page.url.pathname === '/map' ? 'page' : undefined}>Map</a>
+			<a href="/scraper" aria-current={$page.url.pathname === '/scraper' ? 'page' : undefined}>Scraper</a>
+			<a href="/clients" aria-current={$page.url.pathname === '/clients' ? 'page' : undefined}>Clients</a>
+			<a href="/analytics" aria-current={$page.url.pathname === '/analytics' ? 'page' : undefined}>Analytics</a>
+		</div>
 		{#if $demoMode}
 			<a href="/login" class="auth-btn login-btn">Sign In</a>
 		{:else}
 			<button class="auth-btn logout-btn" onclick={handleLogout}>Sign Out</button>
 		{/if}
-	{/if}
-	<button
-		class="hamburger"
-		onclick={() => (menuOpen = !menuOpen)}
-		aria-label={menuOpen ? 'Close menu' : 'Open menu'}
-		aria-expanded={menuOpen}
-	>
-		<span class="hamburger-line" class:open={menuOpen}></span>
-		<span class="hamburger-line" class:open={menuOpen}></span>
-		<span class="hamburger-line" class:open={menuOpen}></span>
-	</button>
-</nav>
+		<button
+			class="hamburger"
+			onclick={() => (menuOpen = !menuOpen)}
+			aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+			aria-expanded={menuOpen}
+		>
+			<span class="hamburger-line" class:open={menuOpen}></span>
+			<span class="hamburger-line" class:open={menuOpen}></span>
+			<span class="hamburger-line" class:open={menuOpen}></span>
+		</button>
+	</nav>
 
-{#if menuOpen}
-	<div class="mobile-menu" role="navigation" aria-label="Mobile navigation">
-		<a href="/" onclick={closeMenu} aria-current={$page.url.pathname === '/' ? 'page' : undefined}>Leads</a>
-		<a href="/pipeline" onclick={closeMenu} aria-current={$page.url.pathname === '/pipeline' ? 'page' : undefined}>Pipeline</a>
-		<a href="/map" onclick={closeMenu} aria-current={$page.url.pathname === '/map' ? 'page' : undefined}>Map</a>
-		<a href="/scraper" onclick={closeMenu} aria-current={$page.url.pathname === '/scraper' ? 'page' : undefined}>Scraper</a>
-		<a href="/clients" onclick={closeMenu} aria-current={$page.url.pathname === '/clients' ? 'page' : undefined}>Clients</a>
-		<a href="/analytics" onclick={closeMenu} aria-current={$page.url.pathname === '/analytics' ? 'page' : undefined}>Analytics</a>
-		{#if $demoMode}
-			<a href="/login" class="mobile-auth-btn" onclick={closeMenu}>Sign In →</a>
-		{:else}
-			<button class="mobile-auth-btn" onclick={() => { closeMenu(); handleLogout(); }}>Sign Out</button>
-		{/if}
-	</div>
+	{#if menuOpen}
+		<div class="mobile-menu" role="navigation" aria-label="Mobile navigation">
+			<a href="/" onclick={closeMenu} aria-current={$page.url.pathname === '/' ? 'page' : undefined}>Leads</a>
+			<a href="/pipeline" onclick={closeMenu} aria-current={$page.url.pathname === '/pipeline' ? 'page' : undefined}>Pipeline</a>
+			<a href="/map" onclick={closeMenu} aria-current={$page.url.pathname === '/map' ? 'page' : undefined}>Map</a>
+			<a href="/scraper" onclick={closeMenu} aria-current={$page.url.pathname === '/scraper' ? 'page' : undefined}>Scraper</a>
+			<a href="/clients" onclick={closeMenu} aria-current={$page.url.pathname === '/clients' ? 'page' : undefined}>Clients</a>
+			<a href="/analytics" onclick={closeMenu} aria-current={$page.url.pathname === '/analytics' ? 'page' : undefined}>Analytics</a>
+			{#if $demoMode}
+				<a href="/login" class="mobile-auth-btn" onclick={closeMenu}>Sign In →</a>
+			{:else}
+				<button class="mobile-auth-btn" onclick={() => { closeMenu(); handleLogout(); }}>Sign Out</button>
+			{/if}
+		</div>
+	{/if}
 {/if}
 
 <DemoBanner />
@@ -371,6 +371,10 @@
 		}
 
 		.nav-links {
+			display: none;
+		}
+
+		.auth-btn {
 			display: none;
 		}
 
