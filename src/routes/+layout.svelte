@@ -3,7 +3,9 @@
 	import { page } from '$app/stores';
 	import favicon from '$lib/assets/favicon.svg';
 	import DemoBanner from '$lib/components/DemoBanner.svelte';
-	import { demoMode } from '$lib/demo/state';
+	import { demoMode, exitDemo } from '$lib/demo/state';
+	import { goto } from '$app/navigation';
+	import { supabase } from '$lib/supabase.js';
 
 	let { children } = $props();
 	let menuOpen = $state(false);
@@ -16,6 +18,16 @@
 
 	function closeMenu() {
 		menuOpen = false;
+	}
+
+	async function handleLogout() {
+		if ($demoMode) {
+			exitDemo();
+		} else {
+			await supabase?.auth.signOut();
+			document.cookie = 'sb_access_token=; path=/; max-age=0; SameSite=Lax';
+			goto('/login');
+		}
 	}
 </script>
 
@@ -42,6 +54,13 @@
 		<a href="/clients" aria-current={$page.url.pathname === '/clients' ? 'page' : undefined}>Clients</a>
 		<a href="/analytics" aria-current={$page.url.pathname === '/analytics' ? 'page' : undefined}>Analytics</a>
 	</div>
+	{#if $page.url.pathname !== '/login'}
+		{#if $demoMode}
+			<a href="/login" class="auth-btn login-btn">Sign In</a>
+		{:else}
+			<button class="auth-btn logout-btn" onclick={handleLogout}>Sign Out</button>
+		{/if}
+	{/if}
 	<button
 		class="hamburger"
 		onclick={() => (menuOpen = !menuOpen)}
@@ -62,6 +81,11 @@
 		<a href="/scraper" onclick={closeMenu} aria-current={$page.url.pathname === '/scraper' ? 'page' : undefined}>Scraper</a>
 		<a href="/clients" onclick={closeMenu} aria-current={$page.url.pathname === '/clients' ? 'page' : undefined}>Clients</a>
 		<a href="/analytics" onclick={closeMenu} aria-current={$page.url.pathname === '/analytics' ? 'page' : undefined}>Analytics</a>
+		{#if $demoMode}
+			<a href="/login" class="mobile-auth-btn" onclick={closeMenu}>Sign In →</a>
+		{:else}
+			<button class="mobile-auth-btn" onclick={() => { closeMenu(); handleLogout(); }}>Sign Out</button>
+		{/if}
 	</div>
 {/if}
 
@@ -213,6 +237,67 @@
 		color: var(--text-primary);
 		font-weight: 600;
 		border-bottom-color: var(--accent-highlight);
+	}
+
+	.auth-btn {
+		font-family: var(--font-ui);
+		font-size: 0.78rem;
+		font-weight: 600;
+		padding: 5px 14px;
+		border-radius: var(--radius-pill);
+		cursor: pointer;
+		transition: box-shadow var(--dur-fast), transform var(--dur-fast), opacity var(--dur-fast);
+		white-space: nowrap;
+		flex-shrink: 0;
+		text-decoration: none;
+	}
+
+	.login-btn {
+		background: var(--gradient-primary);
+		color: #fff;
+		border: none;
+	}
+
+	.login-btn:hover {
+		box-shadow: var(--glow-soft);
+		transform: translateY(-1px);
+		color: #fff;
+	}
+
+	.logout-btn {
+		background: transparent;
+		color: var(--text-muted);
+		border: 1px solid var(--border-subtle);
+	}
+
+	.logout-btn:hover {
+		color: var(--text-primary);
+		border-color: var(--border-strong);
+	}
+
+	.mobile-auth-btn {
+		font-family: var(--font-ui);
+		font-size: 0.95rem;
+		font-weight: 500;
+		color: var(--accent-highlight);
+		padding: 0.9rem 1.5rem;
+		border-bottom: 1px solid var(--border-grid);
+		text-decoration: none;
+		transition: color var(--dur-fast), background var(--dur-fast);
+		min-height: 44px;
+		display: flex;
+		align-items: center;
+		background: none;
+		border-top: none;
+		border-left: none;
+		border-right: none;
+		cursor: pointer;
+		width: 100%;
+		text-align: left;
+	}
+
+	.mobile-auth-btn:hover {
+		background: rgba(255, 255, 255, 0.03);
 	}
 
 	.hamburger {
