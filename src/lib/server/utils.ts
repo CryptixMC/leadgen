@@ -67,3 +67,22 @@ export function getSocialPlatform(url: string | null | undefined): string | null
 	}
 	return null;
 }
+
+export function normalizeWebsiteUrl(raw: string | null | undefined): string | null {
+	const trimmed = (raw ?? '').trim();
+	if (!trimmed) return null;
+
+	const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+	let parsed: URL;
+	try {
+		parsed = new URL(withScheme);
+	} catch {
+		throw new Error('Website URL is not valid');
+	}
+
+	if (isSocialMediaUrl(parsed.href) || isAggregatorUrl(parsed.href)) {
+		throw new Error('Website URL cannot be a social media or delivery aggregator link');
+	}
+
+	return parsed.href;
+}

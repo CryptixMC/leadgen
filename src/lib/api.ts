@@ -106,14 +106,32 @@ export async function batchHideLeads(ids: string[]): Promise<{ hidden: number }>
 
 export async function updateLead(
 	id: string,
-	data: { status?: string; notes?: string }
+	data: {
+		status?: string;
+		notes?: string;
+		hidden?: boolean;
+		business_name?: string;
+		address?: string;
+		phone?: string;
+		email?: string;
+		website_url?: string;
+	}
 ): Promise<Lead> {
 	const res = await fetch(`${BASE}/leads/${id}`, {
 		method: 'PATCH',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(data)
 	});
-	if (!res.ok) throw new Error(`Failed to update lead: ${res.statusText}`);
+	if (!res.ok) {
+		let detail: string;
+		try {
+			const json = await res.json();
+			detail = json.message || json.error || res.statusText;
+		} catch {
+			detail = res.statusText;
+		}
+		throw new Error(`Failed to update lead: ${detail}`);
+	}
 	return res.json();
 }
 
@@ -171,7 +189,16 @@ export async function createLead(payload: Record<string, unknown>): Promise<Lead
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(payload)
 	});
-	if (!res.ok) throw new Error(`Failed to create lead: ${res.statusText}`);
+	if (!res.ok) {
+		let detail: string;
+		try {
+			const json = await res.json();
+			detail = json.message || json.error || res.statusText;
+		} catch {
+			detail = res.statusText;
+		}
+		throw new Error(`Failed to create lead: ${detail}`);
+	}
 	return res.json();
 }
 

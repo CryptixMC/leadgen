@@ -68,7 +68,7 @@ leadgen/
 │   │   │   │   ├── geocode-missing/# POST — fill missing lat/lng
 │   │   │   │   └── rescore/        # POST — re-enrich + rescore all
 │   │   │   └── scrapes/            # POST /api/scrapes — trigger Places scrape
-│   │   ├── leads/[id]/             # lead detail page, status/notes editing
+│   │   ├── leads/[id]/             # lead detail page, status/notes/edit-lead editing
 │   │   ├── clients/                # clients list + individual client pages
 │   │   ├── map/                    # Leaflet map of geocoded leads
 │   │   ├── analytics/              # dashboard stats + charts
@@ -250,7 +250,7 @@ All routes require `Authorization: Bearer <token>` except `/api/health`.
 | POST | `/api/leads/geocode-missing` | Fill null lat/lng via Places Details API |
 | POST | `/api/leads/rescore` | Re-enrich + rescore all leads |
 | GET | `/api/leads/[id]` | Single lead |
-| PATCH | `/api/leads/[id]` | Update `status` and/or `notes` |
+| PATCH | `/api/leads/[id]` | Update `status`, `notes`, `hidden`, `business_name`, `address`, `phone`, `email`, and/or `website_url` |
 | DELETE | `/api/leads/[id]` | Delete lead |
 | POST | `/api/leads/[id]/enrich` | Run enrichment pipeline |
 | POST | `/api/leads/[id]/generate-email` | Generate AI email draft via Gemini |
@@ -304,8 +304,11 @@ configures the Supabase MCP server for direct DB access during development.
 - Client data fetching goes only through `src/lib/api.ts` — never calls Supabase directly.
 - API routes live in `src/routes/api/` as SvelteKit `+server.ts` files.
 - `google_place_id` is the unique key — no duplicate leads. Manual leads get `manual_<uuid>`.
-- Lead score recalculates on every enrichment update.
-- Status and notes are the only fields the UI can write — enrichment owns everything else.
+- Lead score recalculates on every enrichment update, and also when `website_url` or `email`
+  is changed via the Edit Lead modal (those feed scoring signals).
+- Status and notes are user-writable inline on the lead detail page; Business Name, Address,
+  Phone, Email, and Website URL are user-writable via the Edit Lead modal. Every other field
+  is enrichment-owned.
 - Social media and aggregator URLs must be filtered before saving `website_url` — use `utils.ts` helpers.
 - Scraper handles 429s with exponential backoff in `scraper.ts`.
 - Never hardcode API keys — always use `import { env } from '$env/dynamic/private'`.

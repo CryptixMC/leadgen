@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
 import { requireAuth } from '$lib/server/auth';
 import { calculateScore } from '$lib/server/scoring';
+import { normalizeWebsiteUrl } from '$lib/server/utils';
 import { DEMO_LEADS } from '$lib/demo/data';
 
 export const GET: RequestHandler = async ({ locals, url }) => {
@@ -34,14 +35,24 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 	requireAuth(locals);
 	const payload = await request.json();
 	const now = new Date().toISOString();
-	const hasWebsite = Boolean(payload.website_url);
-	const hasHttps = hasWebsite && String(payload.website_url).startsWith('https://');
+
+	const businessName = String(payload.business_name ?? '').trim();
+	if (!businessName) throw error(400, 'Business name is required');
+
+	let websiteUrl: string | null;
+	try {
+		websiteUrl = normalizeWebsiteUrl(payload.website_url);
+	} catch (e) {
+		throw error(400, e instanceof Error ? e.message : 'Invalid website URL');
+	}
+	const hasWebsite = Boolean(websiteUrl);
+	const hasHttps = hasWebsite && String(websiteUrl).startsWith('https://');
 
 	const lead: Record<string, unknown> = {
-		business_name: payload.business_name,
+		business_name: businessName,
 		address: payload.address ?? null,
 		phone: payload.phone ?? null,
-		website_url: payload.website_url ?? null,
+		website_url: websiteUrl,
 		email: payload.email ?? null,
 		google_rating: payload.google_rating ?? 0,
 		review_count: payload.review_count ?? 0,

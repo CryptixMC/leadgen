@@ -486,7 +486,7 @@
 
 					<label class="field field-full">
 						<span>Website URL <span class="optional-hint">optional</span></span>
-						<input type="url" bind:value={createForm.website_url} placeholder="https://example.com" />
+						<input type="text" bind:value={createForm.website_url} placeholder="https://example.com" />
 					</label>
 
 					<label class="field">
