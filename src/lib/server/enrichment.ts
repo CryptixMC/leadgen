@@ -40,9 +40,6 @@ export async function fetchPagespeed(url: string): Promise<Record<string, unknow
 	}
 	if (GOOGLE_PAGESPEED_API_KEY) params.append('key', GOOGLE_PAGESPEED_API_KEY);
 
-	const desktopParams = new URLSearchParams({ url, strategy: 'desktop', category: 'performance' });
-	if (GOOGLE_PAGESPEED_API_KEY) desktopParams.append('key', GOOGLE_PAGESPEED_API_KEY);
-
 	const nullResult = {
 		pagespeed_mobile: null,
 		pagespeed_desktop: null,
@@ -53,15 +50,11 @@ export async function fetchPagespeed(url: string): Promise<Record<string, unknow
 	};
 
 	try {
-		const [resp, respD] = await Promise.all([
-			fetch(`${PAGESPEED_URL}?${params}`, { signal: withTimeout(45_000) }),
-			fetch(`${PAGESPEED_URL}?${desktopParams}`, { signal: withTimeout(45_000) })
-		]);
+		const resp = await fetch(`${PAGESPEED_URL}?${params}`, { signal: withTimeout(45_000) });
 
-		if (!resp.ok || !respD.ok) return nullResult;
+		if (!resp.ok) return nullResult;
 
 		const data = await resp.json();
-		const dataD = await respD.json();
 
 		const lhr = data.lighthouseResult ?? {};
 		const categories = lhr.categories ?? {};
@@ -71,17 +64,13 @@ export async function fetchPagespeed(url: string): Promise<Record<string, unknow
 			return s != null ? Math.round(s * 100) : null;
 		};
 
-		const categoriesD = dataD.lighthouseResult?.categories ?? {};
-		const desktopScore = categoriesD.performance?.score;
-		const desktopInt = desktopScore != null ? Math.round(desktopScore * 100) : null;
-
 		const audits = lhr.audits ?? {};
 		const mobileFriendly = audits.viewport?.score === 1;
 		const screenshot = audits['final-screenshot']?.details?.data ?? null;
 
 		return {
 			pagespeed_mobile: score('performance'),
-			pagespeed_desktop: desktopInt,
+			pagespeed_desktop: null,
 			mobile_friendly: mobileFriendly,
 			website_screenshot: screenshot,
 			pagespeed_seo: score('seo'),
@@ -268,44 +257,46 @@ export async function scrapeWebsite(url: string): Promise<Record<string, unknown
 				}
 			});
 
-			for (const subUrl of subPageHrefs.slice(0, 2)) {
-				if (foundEmail) break;
-				try {
+			const subResults = await Promise.allSettled(
+				subPageHrefs.slice(0, 2).map(async (subUrl) => {
 					const subResp = await fetch(subUrl, {
 						headers: { 'User-Agent': BOT_UA },
 						signal: withTimeout(8_000)
 					});
-					if (!subResp.ok) continue;
+					if (!subResp.ok) return null;
 					const subHtml = await subResp.text();
 					const $sub = cheerioLoad(subHtml);
 
+					let subEmail: string | null = null;
 					$sub('a[href]').each((_, el) => {
-						if (foundEmail) return;
+						if (subEmail) return;
 						const href = $sub(el).attr('href') ?? '';
 						if (href.startsWith('mailto:')) {
 							const candidate = href.slice(7).split('?')[0].trim();
 							if (EMAIL_RE.test(candidate)) {
-								foundEmail = candidate;
+								subEmail = candidate;
 								EMAIL_RE.lastIndex = 0;
 							}
 						}
 					});
 
-					if (!foundEmail) {
+					if (!subEmail) {
 						const subText = $sub.text();
 						EMAIL_RE.lastIndex = 0;
 						let subMatch: RegExpExecArray | null;
 						while ((subMatch = EMAIL_RE.exec(subText)) !== null) {
 							const candidate = subMatch[0];
 							if (!EMAIL_EXCLUDE_EXTS.has(candidate.toLowerCase().replace(/.*(\.[^.]+)$/, '$1'))) {
-								foundEmail = candidate;
+								subEmail = candidate;
 								break;
 							}
 						}
 					}
-				} catch {
-					// skip sub-page on error
-				}
+					return subEmail;
+				})
+			);
+			for (const r of subResults) {
+				if (r.status === 'fulfilled' && r.value) { foundEmail = r.value; break; }
 			}
 		}
 		result.email = foundEmail;
