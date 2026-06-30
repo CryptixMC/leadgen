@@ -118,7 +118,7 @@
 
 	function selectNonEnriched() {
 		const next = new Set(selected);
-		filtered.filter((l) => l.also_on_yelp === null).forEach((l) => next.add(l.id));
+		filtered.filter((l) => l.lead_score === null).forEach((l) => next.add(l.id));
 		selected = next;
 	}
 
@@ -247,9 +247,13 @@
 					{deleting ? 'Deleting…' : `Delete ${selected.size} selected`}
 				</button>
 			{/if}
+<<<<<<< HEAD
 			<button class="select-unenriched-btn" onclick={selectNonEnriched}>
 				Select unenriched
 			</button>
+=======
+			<button class="select-unenriched-btn" onclick={selectNonEnriched}>Select unenriched</button>
+>>>>>>> fa42215 (Fix 'Select unenriched' button to select leads with null lead_score)
 			<button class="sort-btn" onclick={() => (sortAsc = !sortAsc)}>
 				Score {sortAsc ? '↑' : '↓'}
 			</button>
@@ -551,6 +555,7 @@
 
 	.select-unenriched-btn {
 		background: transparent;
+<<<<<<< HEAD
 		border: 1px solid var(--border-subtle);
 		color: var(--text-muted);
 		padding: 0.38rem 0.85rem;
@@ -564,6 +569,21 @@
 	.select-unenriched-btn:hover {
 		border-color: var(--accent-primary);
 		color: var(--text-primary);
+=======
+		border: 1px solid #2a2a3e;
+		color: #94a3b8;
+		padding: 0.35rem 0.75rem;
+		border-radius: 6px;
+		cursor: pointer;
+		font-family: 'JetBrains Mono', monospace;
+		font-size: 0.8rem;
+		transition: border-color 0.15s, color 0.15s;
+	}
+
+	.select-unenriched-btn:hover {
+		border-color: #7c3aed;
+		color: #7c3aed;
+>>>>>>> fa42215 (Fix 'Select unenriched' button to select leads with null lead_score)
 	}
 
 	.sort-btn {
