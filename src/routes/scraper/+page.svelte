@@ -3,6 +3,7 @@
 
 	let category = $state('');
 	let city = $state('Winnipeg MB');
+	let neighborhood = $state('');
 	let target = $state(60);
 	let loading = $state(false);
 	let result = $state<{ upserted: number; category: string; city: string; pages_fetched: number } | null>(null);
@@ -47,7 +48,7 @@
 		result = null;
 
 		try {
-			result = await triggerScrape(category.trim(), city.trim(), target);
+			result = await triggerScrape(category.trim(), city.trim(), target, neighborhood.trim() || undefined);
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Scrape failed';
 		} finally {
@@ -90,6 +91,18 @@
 		</div>
 
 		<div class="field">
+			<label for="neighborhood">Neighborhood <span class="optional">(optional)</span></label>
+			<input
+				id="neighborhood"
+				type="text"
+				bind:value={neighborhood}
+				placeholder="e.g. Exchange District, St. Vital"
+				disabled={loading}
+			/>
+			<p class="field-hint">Narrows the search to a specific area — great for D2D walking routes.</p>
+		</div>
+
+		<div class="field">
 			<label for="target">Target leads</label>
 			<input
 				id="target"
@@ -110,7 +123,7 @@
 	{#if loading}
 		<div class="status-card info">
 			<span class="spinner"></span>
-			Scraping up to <strong>{target}</strong> leads for <strong>{category}</strong> in <strong>{city}</strong>…
+			Scraping up to <strong>{target}</strong> leads for <strong>{category}</strong> in {neighborhood.trim() ? `<strong>${neighborhood}</strong>, ` : ''}<strong>{city}</strong>…
 		</div>
 	{/if}
 
@@ -236,6 +249,22 @@
 	input::placeholder {
 		color: var(--text-muted);
 		opacity: 0.5;
+	}
+
+	.optional {
+		font-weight: 400;
+		text-transform: none;
+		letter-spacing: 0;
+		color: var(--text-muted);
+		opacity: 0.6;
+		font-size: 0.7rem;
+	}
+
+	.field-hint {
+		color: var(--text-muted);
+		font-size: 0.72rem;
+		opacity: 0.65;
+		margin: 0;
 	}
 
 	input:disabled {

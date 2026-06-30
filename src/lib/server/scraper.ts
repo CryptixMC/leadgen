@@ -130,7 +130,8 @@ async function upsertPlace(place: Record<string, unknown>, apiKey: string): Prom
 export async function runScrape(
 	category: string,
 	city: string,
-	target: number
+	target: number,
+	neighborhood?: string
 ): Promise<{ upserted: number; category: string; city: string; pages_fetched: number }> {
 	const apiKey = GOOGLE_PLACES_API_KEY;
 	if (!apiKey) throw new Error('GOOGLE_PLACES_API_KEY not configured');
@@ -138,8 +139,8 @@ export async function runScrape(
 	const safeTarget = Math.max(1, target);
 	let upserted = 0;
 	let pagesFetched = 0;
-	let cityLat: number | null = null;
-	let cityLng: number | null = null;
+	let seedLat: number | null = null;
+	let seedLng: number | null = null;
 
 	const sem = new Semaphore(8);
 
@@ -152,8 +153,29 @@ export async function runScrape(
 		}
 	};
 
+	// Build the text search query — neighborhood-scoped if provided
+	const searchQuery = neighborhood
+		? `${category} in ${neighborhood}, ${city}`
+		: `${category} in ${city}`;
+
+	// If a neighborhood is given, geocode it first for a tight nearby-search radius
+	if (neighborhood) {
+		const geoData = await getWithBackoff(PLACES_SEARCH_URL, {
+			query: `${neighborhood}, ${city}`,
+			key: apiKey
+		});
+		const geoPlaces = (geoData.results as Array<Record<string, unknown>>) ?? [];
+		if (geoPlaces.length) {
+			const loc = (geoPlaces[0].geometry as Record<string, unknown>)?.location as
+				| Record<string, number>
+				| undefined;
+			seedLat = loc?.lat ?? null;
+			seedLng = loc?.lng ?? null;
+		}
+	}
+
 	const searchData = await getWithBackoff(PLACES_SEARCH_URL, {
-		query: `${category} in ${city}`,
+		query: searchQuery,
 		key: apiKey
 	});
 
@@ -165,30 +187,33 @@ export async function runScrape(
 	pagesFetched++;
 	const places = (searchData.results as Array<Record<string, unknown>>) ?? [];
 
-	if (places.length) {
+	if (places.length && seedLat === null) {
 		const loc = (places[0].geometry as Record<string, unknown>)?.location as
 			| Record<string, number>
 			| undefined;
-		cityLat = loc?.lat ?? null;
-		cityLng = loc?.lng ?? null;
+		seedLat = loc?.lat ?? null;
+		seedLng = loc?.lng ?? null;
 	}
 
 	const batch = places.slice(0, safeTarget);
 	const results = await Promise.all(batch.map(upsertSafe));
 	upserted += results.filter(Boolean).length;
 
-	if (upserted < safeTarget && cityLat !== null) {
+	if (upserted < safeTarget && seedLat !== null) {
+		// Use tighter radius for neighborhood searches
+		const radius = neighborhood ? 800 : 50000;
 		let nextPageToken: string | null = null;
 		let firstNearby = true;
 
 		while (upserted < safeTarget) {
-			const nearbyData = await fetchNearbyPage(
-				apiKey,
-				category,
-				cityLat,
-				cityLng!,
-				firstNearby ? null : nextPageToken
-			);
+			const nearbyData = firstNearby
+				? await getWithBackoff(PLACES_NEARBY_URL, {
+						location: `${seedLat},${seedLng}`,
+						radius,
+						keyword: category,
+						key: apiKey
+					})
+				: await fetchNearbyPage(apiKey, category, seedLat, seedLng!, nextPageToken);
 			firstNearby = false;
 
 			const nearbyStatus = nearbyData.status as string;

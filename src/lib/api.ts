@@ -168,12 +168,13 @@ export async function createLead(payload: Record<string, unknown>): Promise<Lead
 export async function triggerScrape(
 	category: string,
 	city: string,
-	target: number
+	target: number,
+	neighborhood?: string
 ): Promise<{ upserted: number; category: string; city: string; pages_fetched: number }> {
 	const res = await fetch(`${BASE}/scrapes`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ category, city, target })
+		body: JSON.stringify({ category, city, target, neighborhood: neighborhood || undefined })
 	});
 	if (!res.ok) throw new Error(`Scrape failed: ${res.statusText}`);
 	return res.json();
