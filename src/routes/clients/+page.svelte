@@ -85,7 +85,7 @@
 
 	h1 {
 		font-size: 1.6rem;
-		color: #f1f5f9;
+		color: var(--text-primary);
 	}
 
 	.mrr-display {
@@ -95,31 +95,32 @@
 	}
 
 	.mrr-label {
-		font-size: 0.72rem;
-		color: #64748b;
+		font-family: var(--font-ui);
+		font-size: 0.68rem;
+		color: var(--text-muted);
 		text-transform: uppercase;
-		letter-spacing: 0.06em;
+		letter-spacing: 0.12em;
 		font-weight: 600;
 	}
 
 	.mrr-value {
-		font-family: 'JetBrains Mono', monospace;
+		font-family: var(--font-display);
 		font-size: 2rem;
 		font-weight: 700;
-		color: #4ade80;
+		color: var(--state-success);
 		line-height: 1.1;
 	}
 
 	.mrr-mo {
 		font-size: 1rem;
-		color: #64748b;
+		color: var(--text-muted);
 		font-weight: 400;
 	}
 
 	.table-wrap {
 		overflow-x: auto;
-		border-radius: 10px;
-		border: 1px solid #1a1a2e;
+		border-radius: var(--radius-lg);
+		border: 1px solid var(--border-subtle);
 	}
 
 	table {
@@ -129,15 +130,17 @@
 	}
 
 	thead th {
-		background: #10101a;
-		color: #64748b;
+		background: rgba(17, 17, 24, 0.9);
+		color: var(--text-muted);
+		font-family: var(--font-ui);
 		font-weight: 600;
-		font-size: 0.75rem;
+		font-size: 0.68rem;
 		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		padding: 0.75rem 1rem;
+		letter-spacing: 0.12em;
+		padding: 0.9rem 1rem;
 		text-align: left;
 		white-space: nowrap;
+		border-bottom: 1px solid var(--border-grid);
 	}
 
 	thead th.num {
@@ -145,13 +148,13 @@
 	}
 
 	tbody tr {
-		border-top: 1px solid #1a1a2e;
+		border-top: 1px solid var(--border-grid);
 		cursor: pointer;
-		transition: background 0.1s;
+		transition: background var(--dur-fast);
 	}
 
 	tbody tr:hover {
-		background: #13131f;
+		background: rgba(255, 255, 255, 0.03);
 	}
 
 	td {
@@ -161,7 +164,7 @@
 
 	.name {
 		font-weight: 500;
-		color: #f1f5f9;
+		color: var(--text-primary);
 		white-space: nowrap;
 	}
 
@@ -173,28 +176,32 @@
 
 	.badge {
 		display: inline-block;
-		padding: 0.2rem 0.55rem;
-		border-radius: 999px;
-		font-size: 0.72rem;
+		padding: 0.18rem 0.55rem;
+		border-radius: var(--radius-pill);
+		font-family: var(--font-ui);
+		font-size: 0.68rem;
 		font-weight: 600;
 		text-transform: uppercase;
-		letter-spacing: 0.04em;
+		letter-spacing: 0.06em;
 		white-space: nowrap;
 	}
 
 	.badge-website {
-		background: #1e2a4a;
+		background: rgba(96, 165, 250, 0.1);
+		border: 1px solid rgba(96, 165, 250, 0.25);
 		color: #60a5fa;
 	}
 
 	.badge-tools {
-		background: #2a1a4e;
+		background: rgba(124, 58, 237, 0.12);
+		border: 1px solid rgba(124, 58, 237, 0.3);
 		color: #a78bfa;
 	}
 
 	.badge-hosting {
-		background: #14291a;
-		color: #4ade80;
+		background: rgba(45, 198, 83, 0.1);
+		border: 1px solid rgba(45, 198, 83, 0.3);
+		color: #2DC653;
 	}
 
 	.num {
@@ -202,24 +209,25 @@
 	}
 
 	.mrr-cell {
-		font-family: 'JetBrains Mono', monospace;
+		font-family: var(--font-display);
 		font-weight: 600;
-		color: #4ade80;
+		color: var(--state-success);
 	}
 
 	.mo {
-		color: #64748b;
+		color: var(--text-muted);
 		font-weight: 400;
 		font-size: 0.8em;
 	}
 
 	.date {
-		color: #94a3b8;
+		color: var(--text-muted);
 		white-space: nowrap;
 	}
 
 	.none {
-		color: #4a5568;
+		color: var(--text-muted);
+		opacity: 0.4;
 	}
 
 	.view-cell {
@@ -229,10 +237,11 @@
 
 	.empty {
 		text-align: center;
-		color: #4a5568;
+		color: var(--text-muted);
+		opacity: 0.5;
 		padding: 4rem 2rem;
-		border-radius: 10px;
-		border: 1px solid #1a1a2e;
+		border-radius: var(--radius-lg);
+		border: 1px solid var(--border-subtle);
 		font-size: 0.95rem;
 	}
 </style>

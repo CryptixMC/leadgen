@@ -15,10 +15,10 @@
 
 	let { data } = $props();
 
-	const TEXT = '#e2e8f0';
-	const GRID = '#1a1a2e';
-	const ACCENT = '#7c3aed';
-	const ACCENT_BAR = 'rgba(124, 58, 237, 0.8)';
+	const TEXT = '#9090B0';
+	const GRID = '#1E1E2E';
+	const ACCENT = '#7C3AED';
+	const ACCENT_BAR = 'rgba(124, 58, 237, 0.7)';
 
 	function monthLabel(ym: string): string {
 		const [y, m] = ym.split('-');
@@ -28,26 +28,23 @@
 
 	const baseScales = {
 		x: {
-			ticks: { color: TEXT, font: { family: "'DM Sans', sans-serif", size: 11 } },
+			ticks: { color: TEXT, font: { family: "'Syne', sans-serif", size: 11 } },
 			grid: { color: GRID }
 		},
 		y: {
-			ticks: { color: TEXT, font: { family: "'DM Sans', sans-serif", size: 11 } },
+			ticks: { color: TEXT, font: { family: "'Syne', sans-serif", size: 11 } },
 			grid: { color: GRID }
 		}
 	};
 
-	const baseLegend = { labels: { color: TEXT } };
+	const baseLegend = { labels: { color: TEXT, font: { family: "'Syne', sans-serif" } } };
 
-	// MRR line chart
 	let mrrCanvas: HTMLCanvasElement = $state()!;
 	let mrrChart: Chart | null = null;
 
-	// Pipeline bar chart
 	let funnelCanvas: HTMLCanvasElement = $state()!;
 	let funnelChart: Chart | null = null;
 
-	// Revenue bar chart
 	let revCanvas: HTMLCanvasElement = $state()!;
 	let revChart: Chart | null = null;
 
@@ -213,26 +210,33 @@
 	h1 {
 		font-size: 1.5rem;
 		font-weight: 700;
-		color: #e2e8f0;
+		color: var(--text-primary);
 		margin-bottom: 0.5rem;
 	}
 
 	.chart-section {
-		background: #10101a;
-		border: 1px solid #1a1a2e;
-		border-radius: 10px;
+		background: var(--bg-card);
+		border: 1px solid var(--border-subtle);
+		border-radius: var(--radius-lg);
 		padding: 1.5rem;
 		display: flex;
 		flex-direction: column;
 		gap: 1rem;
+		transition: border-color var(--dur-base), box-shadow var(--dur-base);
+	}
+
+	.chart-section:hover {
+		border-color: var(--border-accent);
+		box-shadow: var(--glow-card);
 	}
 
 	h2 {
-		font-size: 0.95rem;
+		font-family: var(--font-ui);
+		font-size: 0.72rem;
 		font-weight: 600;
-		color: #94a3b8;
+		color: var(--text-muted);
 		text-transform: uppercase;
-		letter-spacing: 0.05em;
+		letter-spacing: 0.12em;
 	}
 
 	.chart-wrap {
@@ -241,7 +245,8 @@
 	}
 
 	.empty {
-		color: #4a5568;
+		color: var(--text-muted);
+		opacity: 0.5;
 		font-size: 0.9rem;
 		padding: 3rem 0;
 		text-align: center;

@@ -184,20 +184,20 @@
 
 	h1 {
 		font-size: 1.5rem;
-		color: #f1f5f9;
+		color: var(--text-primary);
 		margin-bottom: 0.4rem;
 	}
 
 	.subtitle {
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.875rem;
 		margin-bottom: 2rem;
 	}
 
 	.card {
-		background: #10101a;
-		border: 1px solid #1a1a2e;
-		border-radius: 10px;
+		background: var(--bg-card);
+		border: 1px solid var(--border-subtle);
+		border-radius: var(--radius-lg);
 		padding: 1.5rem;
 		margin-bottom: 1.25rem;
 	}
@@ -210,30 +210,32 @@
 	}
 
 	label {
-		font-size: 0.8rem;
-		font-weight: 500;
-		color: #94a3b8;
+		font-family: var(--font-ui);
+		font-size: 0.72rem;
+		font-weight: 600;
+		color: var(--text-muted);
 		text-transform: uppercase;
-		letter-spacing: 0.05em;
+		letter-spacing: 0.12em;
 	}
 
 	input {
-		background: #13131f;
-		border: 1px solid #2a2a3e;
-		color: #e2e8f0;
-		padding: 0.55rem 0.8rem;
-		border-radius: 6px;
+		background: var(--bg-surface);
+		border: 1px solid var(--border-subtle);
+		color: var(--text-primary);
+		padding: 0.55rem 0.85rem;
+		border-radius: var(--radius-sm);
 		outline: none;
 		width: 100%;
-		transition: border-color 0.15s;
+		transition: border-color var(--dur-fast);
 	}
 
 	input:focus {
-		border-color: #7c3aed;
+		border-color: var(--accent-primary);
 	}
 
 	input::placeholder {
-		color: #4a5568;
+		color: var(--text-muted);
+		opacity: 0.5;
 	}
 
 	input:disabled {
@@ -242,20 +244,21 @@
 
 	.submit-btn {
 		width: 100%;
-		background: #7c3aed;
+		background: var(--gradient-primary);
 		border: none;
-		color: #fff;
+		color: var(--bg-base);
 		padding: 0.65rem 1.25rem;
-		border-radius: 6px;
+		border-radius: var(--radius-pill);
 		cursor: pointer;
 		font-weight: 600;
 		font-size: 0.9rem;
 		margin-top: 0.5rem;
-		transition: background 0.15s;
+		transition: box-shadow var(--dur-fast), transform var(--dur-fast);
 	}
 
 	.submit-btn:hover:not(:disabled) {
-		background: #6d28d9;
+		box-shadow: var(--glow-cta);
+		transform: translateY(-1px);
 	}
 
 	.submit-btn:disabled {
@@ -264,7 +267,7 @@
 	}
 
 	.status-card {
-		border-radius: 10px;
+		border-radius: var(--radius-md);
 		padding: 1.25rem 1.5rem;
 		font-size: 0.875rem;
 		display: flex;
@@ -274,23 +277,23 @@
 	}
 
 	.status-card.info {
-		background: #1a1a2e;
-		border: 1px solid #2a2a3e;
-		color: #94a3b8;
+		background: rgba(255, 255, 255, 0.03);
+		border: 1px solid var(--border-subtle);
+		color: var(--text-muted);
 		flex-direction: row;
 		align-items: center;
 		gap: 0.75rem;
 	}
 
 	.status-card.success {
-		background: #14291a;
-		border: 1px solid #166534;
+		background: rgba(45, 198, 83, 0.08);
+		border: 1px solid rgba(45, 198, 83, 0.25);
 		color: #86efac;
 	}
 
 	.status-card.err {
-		background: #2a1a1a;
-		border: 1px solid #7f1d1d;
+		background: rgba(248, 113, 113, 0.08);
+		border: 1px solid rgba(248, 113, 113, 0.2);
 		color: #f87171;
 	}
 
@@ -301,51 +304,50 @@
 	}
 
 	.result-num {
-		font-family: 'JetBrains Mono', monospace;
+		font-family: var(--font-display);
 		font-size: 2rem;
 		font-weight: 700;
-		color: #d946ef;
+		color: var(--accent-highlight);
 	}
 
 	.result-detail {
-		color: #4ade80;
+		color: var(--state-success);
 		font-size: 0.8rem;
 	}
 
 	.view-link {
-		color: #d946ef;
+		color: var(--accent-highlight);
 		font-size: 0.85rem;
 		font-weight: 500;
 	}
 
 	.view-link:hover {
-		color: #7c3aed;
+		color: var(--accent-primary);
 	}
 
 	.spinner {
 		display: inline-block;
 		width: 14px;
 		height: 14px;
-		border: 2px solid #2a2a3e;
-		border-top-color: #7c3aed;
+		border: 2px solid var(--border-subtle);
+		border-top-color: var(--accent-primary);
 		border-radius: 50%;
 		animation: spin 0.7s linear infinite;
+		flex-shrink: 0;
 	}
 
 	@keyframes spin {
-		to {
-			transform: rotate(360deg);
-		}
+		to { transform: rotate(360deg); }
 	}
 
 	.section-divider {
-		border-top: 1px solid #1a1a2e;
+		border-top: 1px solid var(--border-grid);
 		margin: 2rem 0 1.5rem;
 	}
 
 	.section-title {
 		font-size: 1.25rem;
-		color: #f1f5f9;
+		color: var(--text-primary);
 		margin-bottom: 0.4rem;
 	}
 
@@ -361,12 +363,12 @@
 	}
 
 	.progress-label {
-		color: #94a3b8;
+		color: var(--text-muted);
 		font-size: 0.875rem;
 	}
 
 	.progress-pct {
-		color: #7c3aed;
+		color: var(--accent-primary);
 		font-weight: 600;
 		font-size: 0.875rem;
 	}
@@ -374,14 +376,14 @@
 	.progress-track {
 		width: 100%;
 		height: 6px;
-		background: #2a2a3e;
+		background: var(--border-subtle);
 		border-radius: 3px;
 		overflow: hidden;
 	}
 
 	.progress-fill {
 		height: 100%;
-		background: linear-gradient(90deg, #7c3aed, #a855f7);
+		background: var(--gradient-primary);
 		border-radius: 3px;
 		transition: width 0.3s ease;
 	}
@@ -393,7 +395,7 @@
 	}
 
 	.progress-name {
-		color: #e2e8f0;
+		color: var(--text-primary);
 		font-style: italic;
 		max-width: 60%;
 		overflow: hidden;
@@ -402,6 +404,6 @@
 	}
 
 	.progress-counts {
-		color: #64748b;
+		color: var(--text-muted);
 	}
 </style>
