@@ -89,8 +89,9 @@ async function fetchNearbyPage(
 	nextPageToken: string | null
 ): Promise<Record<string, unknown>> {
 	if (nextPageToken) {
-		for (let i = 0; i < 8; i++) {
-			await new Promise((r) => setTimeout(r, 3000));
+		const delays = [800, 1200, 1800, 2700, 4000];
+		for (const delay of delays) {
+			await new Promise((r) => setTimeout(r, delay));
 			const data = await getWithBackoff(PLACES_NEARBY_URL, {
 				pagetoken: nextPageToken,
 				key: apiKey
@@ -227,7 +228,7 @@ export async function runScrape(
 	let seedLat: number | null = null;
 	let seedLng: number | null = null;
 
-	const sem = new Semaphore(8);
+	const sem = new Semaphore(15);
 
 	const upsertSafe = async (place: Record<string, unknown>): Promise<boolean> => {
 		if (!isCommercialPlace(place)) return false;
@@ -281,26 +282,29 @@ export async function runScrape(
 			? `${category} in ${neighborhood}, ${city}`
 			: `${category} in ${city}`;
 
-	// If a neighborhood is given, geocode it first for a tight nearby-search radius
-	if (neighborhood) {
-		const geoData = await getWithBackoff(PLACES_SEARCH_URL, {
-			query: `${neighborhood}, ${city}`,
-			key: apiKey
-		});
-		const geoPlaces = (geoData.results as Array<Record<string, unknown>>) ?? [];
-		if (geoPlaces.length) {
-			const loc = (geoPlaces[0].geometry as Record<string, unknown>)?.location as
-				| Record<string, number>
-				| undefined;
-			seedLat = loc?.lat ?? null;
-			seedLng = loc?.lng ?? null;
-		}
-	}
+	// Fire neighborhood geocode and text search concurrently
+	const geoPromise = neighborhood
+		? getWithBackoff(PLACES_SEARCH_URL, { query: `${neighborhood}, ${city}`, key: apiKey })
+				.then((geoData) => {
+					const geoPlaces = (geoData.results as Array<Record<string, unknown>>) ?? [];
+					if (!geoPlaces.length) return null;
+					const loc = (geoPlaces[0].geometry as Record<string, unknown>)?.location as
+						| Record<string, number>
+						| undefined;
+					return loc ? { lat: loc.lat, lng: loc.lng } : null;
+				})
+				.catch(() => null)
+		: Promise.resolve(null);
 
-	const searchData = await getWithBackoff(PLACES_SEARCH_URL, {
-		query: searchQuery,
-		key: apiKey
-	});
+	const [geoResult, searchData] = await Promise.all([
+		geoPromise,
+		getWithBackoff(PLACES_SEARCH_URL, { query: searchQuery, key: apiKey })
+	]);
+
+	if (geoResult) {
+		seedLat = geoResult.lat;
+		seedLng = geoResult.lng;
+	}
 
 	const status = searchData.status as string;
 	if (status !== 'OK' && status !== 'ZERO_RESULTS') {

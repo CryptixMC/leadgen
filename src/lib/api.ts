@@ -129,8 +129,9 @@ export async function geocodeMissing(): Promise<{
 	return res.json();
 }
 
-export async function rescoreLeads(): Promise<{ updated: number; total: number }> {
-	const res = await fetch(`${BASE}/leads/rescore`, {
+export async function rescoreLeads({ force = false } = {}): Promise<{ updated: number; total: number }> {
+	const url = force ? `${BASE}/leads/rescore?force=true` : `${BASE}/leads/rescore`;
+	const res = await fetch(url, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' }
 	});

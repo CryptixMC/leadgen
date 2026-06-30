@@ -14,8 +14,10 @@
 	let deleting = $state(false);
 	let hiding = $state(false);
 	let enriching = $state(false);
+	let enrichMode = $state<'quick' | 'deep'>('quick');
 	let enrichProgress = $state({ done: 0, total: 0 });
 	let enrichCurrentName = $state('');
+	let scanningId = $state<string | null>(null);
 
 	let showCreateModal = $state(false);
 	let createLoading = $state(false);
@@ -122,27 +124,42 @@
 		selected = next;
 	}
 
-	async function enrichSelected() {
+	async function enrichSelected(deep: boolean) {
 		if (selected.size === 0) return;
 		enriching = true;
+		enrichMode = deep ? 'deep' : 'quick';
 		const ids = [...selected];
 		enrichProgress = { done: 0, total: ids.length };
 		try {
 			for (const id of ids) {
 				const lead = (data.leads as { id: string; business_name: string }[]).find((l) => l.id === id);
 				enrichCurrentName = lead?.business_name ?? '';
-				await enrichLead(id);
+				await enrichLead(id, { deep });
 				enrichProgress = { ...enrichProgress, done: enrichProgress.done + 1 };
 			}
 			enrichCurrentName = '';
 			selected = new Set();
 			await invalidateAll();
 		} catch (err) {
-			alert(err instanceof Error ? err.message : 'Enrich failed');
+			alert(err instanceof Error ? err.message : 'Scan failed');
 		} finally {
 			enriching = false;
+			enrichMode = 'quick';
 			enrichProgress = { done: 0, total: 0 };
 			enrichCurrentName = '';
+		}
+	}
+
+	async function scanSingleLead(id: string, deep: boolean, e: Event) {
+		e.stopPropagation();
+		scanningId = id;
+		try {
+			await enrichLead(id, { deep });
+			await invalidateAll();
+		} catch (err) {
+			alert(err instanceof Error ? err.message : 'Scan failed');
+		} finally {
+			scanningId = null;
 		}
 	}
 
@@ -235,10 +252,15 @@
 		</div>
 		<div class="right-controls">
 			{#if selected.size > 0}
-				<button class="enrich-btn" onclick={enrichSelected} disabled={enriching || deleting || hiding}>
-					{enriching
-						? `Enriching ${enrichProgress.done}/${enrichProgress.total}…`
-						: `Enrich ${selected.size} selected`}
+				<button class="quick-scan-btn" onclick={() => enrichSelected(false)} disabled={enriching || deleting || hiding}>
+					{enriching && enrichMode === 'quick'
+						? `Quick scanning ${enrichProgress.done}/${enrichProgress.total}…`
+						: `Quick Scan ${selected.size}`}
+				</button>
+				<button class="deep-scan-btn" onclick={() => enrichSelected(true)} disabled={enriching || deleting || hiding}>
+					{enriching && enrichMode === 'deep'
+						? `Deep scanning ${enrichProgress.done}/${enrichProgress.total}…`
+						: `Deep Scan ${selected.size}`}
 				</button>
 				<button class="hide-btn" onclick={hideSelected} disabled={hiding || deleting || enriching}>
 					{hiding ? 'Hiding…' : `Hide ${selected.size} selected`}
@@ -264,7 +286,7 @@
 				<div class="progress-fill" style="width: {pct}%"></div>
 			</div>
 			{#if enrichCurrentName}
-				<div class="progress-lead-name">{enrichCurrentName}</div>
+				<div class="progress-lead-name">{enrichMode === 'deep' ? 'Deep scanning' : 'Quick scanning'}: {enrichCurrentName}</div>
 			{/if}
 		</div>
 	{/if}
@@ -288,6 +310,7 @@
 					<th class="num" onclick={() => (sortAsc = !sortAsc)}>Score</th>
 					<th>Priority</th>
 					<th>Status</th>
+					<th class="actions-col">Scan</th>
 				</tr>
 			</thead>
 			<tbody>
@@ -343,11 +366,27 @@
 						<td class="num score">{lead.lead_score ?? '—'}</td>
 						<td><span class={priorityClass(lead.priority)}>{lead.priority ?? '—'}</span></td>
 						<td><span class={statusClass(lead.status)}>{lead.status}</span></td>
+						<td class="actions-col" onclick={(e) => e.stopPropagation()}>
+							<div class="row-actions">
+								<button
+									class="row-scan-btn quick"
+									onclick={(e) => scanSingleLead(lead.id, false, e)}
+									disabled={scanningId === lead.id || enriching}
+									title="Quick scan this lead"
+								>{scanningId === lead.id ? '…' : 'Quick'}</button>
+								<button
+									class="row-scan-btn deep"
+									onclick={(e) => scanSingleLead(lead.id, true, e)}
+									disabled={scanningId === lead.id || enriching}
+									title="Deep scan this lead (includes PageSpeed)"
+								>{scanningId === lead.id ? '…' : 'Deep'}</button>
+							</div>
+						</td>
 					</tr>
 				{/each}
 				{#if filtered.length === 0}
 					<tr>
-						<td colspan="8" class="empty">No leads match your filters.</td>
+						<td colspan="9" class="empty">No leads match your filters.</td>
 					</tr>
 				{/if}
 			</tbody>
@@ -625,7 +664,7 @@
 		cursor: not-allowed;
 	}
 
-	.enrich-btn {
+	.quick-scan-btn {
 		background: transparent;
 		border: 1px solid rgba(45, 198, 83, 0.3);
 		color: #2DC653;
@@ -636,13 +675,83 @@
 		transition: border-color var(--dur-fast), background var(--dur-fast);
 	}
 
-	.enrich-btn:hover:not(:disabled) {
+	.quick-scan-btn:hover:not(:disabled) {
 		background: rgba(45, 198, 83, 0.08);
 		border-color: #2DC653;
 	}
 
-	.enrich-btn:disabled {
+	.quick-scan-btn:disabled {
 		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.deep-scan-btn {
+		background: transparent;
+		border: 1px solid rgba(124, 58, 237, 0.35);
+		color: #a78bfa;
+		padding: 0.38rem 0.85rem;
+		border-radius: var(--radius-pill);
+		cursor: pointer;
+		font-size: 0.8rem;
+		transition: border-color var(--dur-fast), background var(--dur-fast);
+	}
+
+	.deep-scan-btn:hover:not(:disabled) {
+		background: rgba(124, 58, 237, 0.1);
+		border-color: #a78bfa;
+	}
+
+	.deep-scan-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.actions-col {
+		white-space: nowrap;
+		width: 1px;
+	}
+
+	.row-actions {
+		display: flex;
+		gap: 0.3rem;
+		opacity: 0;
+		transition: opacity var(--dur-fast);
+	}
+
+	tbody tr:hover .row-actions {
+		opacity: 1;
+	}
+
+	.row-scan-btn {
+		background: transparent;
+		border: 1px solid var(--border-subtle);
+		color: var(--text-muted);
+		padding: 0.2rem 0.5rem;
+		border-radius: var(--radius-sm);
+		cursor: pointer;
+		font-size: 0.68rem;
+		font-family: var(--font-ui);
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		transition: border-color var(--dur-fast), color var(--dur-fast), background var(--dur-fast);
+		white-space: nowrap;
+	}
+
+	.row-scan-btn.quick:hover:not(:disabled) {
+		border-color: rgba(45, 198, 83, 0.4);
+		color: #2DC653;
+		background: rgba(45, 198, 83, 0.06);
+	}
+
+	.row-scan-btn.deep:hover:not(:disabled) {
+		border-color: rgba(124, 58, 237, 0.4);
+		color: #a78bfa;
+		background: rgba(124, 58, 237, 0.08);
+	}
+
+	.row-scan-btn:disabled {
+		opacity: 0.4;
 		cursor: not-allowed;
 	}
 
