@@ -194,7 +194,7 @@ export async function discoverWebsite(
 	return { websiteUrl: null, discoveredSocial };
 }
 
-export async function scrapeWebsite(url: string): Promise<Record<string, unknown>> {
+export async function scrapeWebsite(url: string, { subpages = true } = {}): Promise<Record<string, unknown>> {
 	const result: Record<string, unknown> = {
 		email: null,
 		site_age_estimate: null,
@@ -237,8 +237,8 @@ export async function scrapeWebsite(url: string): Promise<Record<string, unknown
 			}
 		}
 
-		// Email fallback: check /contact and /about sub-pages
-		if (!foundEmail) {
+		// Email fallback: check /contact and /about sub-pages (deep mode only)
+		if (!foundEmail && subpages) {
 			const baseUrl = new URL(url).origin;
 			const subPageHrefs: string[] = [];
 			$('a[href]').each((_, el) => {
@@ -355,7 +355,7 @@ export async function resolveFinalUrl(url: string): Promise<string> {
 	}
 }
 
-export async function runEnrichment(lead: Record<string, unknown>): Promise<Record<string, unknown>> {
+export async function runEnrichment(lead: Record<string, unknown>, { deep = false } = {}): Promise<Record<string, unknown>> {
 	const enrichment: Record<string, unknown> = {};
 
 	const biz = (lead.business_name as string) ?? '';
@@ -412,10 +412,21 @@ export async function runEnrichment(lead: Record<string, unknown>): Promise<Reco
 	if (websiteUrl) {
 		enrichment.has_https = websiteUrl.startsWith('https://');
 		const [pagespeed, websiteData] = await Promise.all([
-			fetchPagespeed(websiteUrl),
-			scrapeWebsite(websiteUrl)
+			deep ? fetchPagespeed(websiteUrl) : Promise.resolve({
+				pagespeed_mobile: null,
+				pagespeed_desktop: null,
+				mobile_friendly: null,
+				website_screenshot: null,
+				pagespeed_seo: null,
+				pagespeed_best_practices: null
+			}),
+			scrapeWebsite(websiteUrl, { subpages: deep })
 		]);
-		Object.assign(enrichment, pagespeed);
+		// Only write pagespeed nulls if deep mode ran and got nothing — preserve existing values in quick mode
+		if (deep) Object.assign(enrichment, pagespeed);
+		else Object.assign(enrichment, Object.fromEntries(
+			Object.entries(pagespeed as Record<string, unknown>).filter(([, v]) => v !== null)
+		));
 		if (websiteData.email) enrichment.email = websiteData.email;
 		if (websiteData.site_age_estimate) enrichment.site_age_estimate = websiteData.site_age_estimate;
 

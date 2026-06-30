@@ -5,7 +5,7 @@ import { requireAuth } from '$lib/server/auth';
 import { runEnrichment } from '$lib/server/enrichment';
 import { calculateScore } from '$lib/server/scoring';
 
-export const POST: RequestHandler = async ({ locals, params }) => {
+export const POST: RequestHandler = async ({ locals, params, url }) => {
 	if (locals.demo) return json({ ok: true });
 
 	requireAuth(locals);
@@ -16,7 +16,8 @@ export const POST: RequestHandler = async ({ locals, params }) => {
 		.single();
 	if (err || !lead) throw error(404, 'Lead not found');
 
-	const enrichment = await runEnrichment(lead as Record<string, unknown>);
+	const deep = url.searchParams.get('deep') === 'true';
+	const enrichment = await runEnrichment(lead as Record<string, unknown>, { deep });
 	const merged = { ...(lead as Record<string, unknown>), ...enrichment };
 	const [score, priority] = calculateScore(merged);
 	enrichment.lead_score = score;

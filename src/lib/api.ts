@@ -143,8 +143,9 @@ export async function deleteLead(id: string): Promise<void> {
 	if (!res.ok && res.status !== 204) throw new Error(`Failed to delete lead: ${res.statusText}`);
 }
 
-export async function enrichLead(id: string): Promise<Lead> {
-	const res = await fetch(`${BASE}/leads/${id}/enrich`, {
+export async function enrichLead(id: string, { deep = false } = {}): Promise<Lead> {
+	const url = `${BASE}/leads/${id}/enrich${deep ? '?deep=true' : ''}`;
+	const res = await fetch(url, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' }
 	});

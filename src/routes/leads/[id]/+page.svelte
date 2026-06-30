@@ -55,16 +55,32 @@
 		return String(val);
 	}
 
+	let deepEnriching = $state(false);
+
 	async function handleEnrich() {
 		enriching = true;
 		enrichMsg = '';
 		try {
 			lead = await enrichLead(lead.id);
-			enrichMsg = 'Enriched!';
+			enrichMsg = 'Done!';
 		} catch {
 			enrichMsg = 'Enrichment failed.';
 		} finally {
 			enriching = false;
+		}
+		setTimeout(() => (enrichMsg = ''), 3000);
+	}
+
+	async function handleDeepEnrich() {
+		deepEnriching = true;
+		enrichMsg = '';
+		try {
+			lead = await enrichLead(lead.id, { deep: true });
+			enrichMsg = 'Deep scan done!';
+		} catch {
+			enrichMsg = 'Deep scan failed.';
+		} finally {
+			deepEnriching = false;
 		}
 		setTimeout(() => (enrichMsg = ''), 3000);
 	}
@@ -206,8 +222,11 @@
 		<button class="back-btn" onclick={() => goto('/')}>← Back</button>
 		<div class="back-actions">
 			{#if enrichMsg}<span class="save-msg">{enrichMsg}</span>{/if}
-			<button class="enrich-btn" onclick={handleEnrich} disabled={enriching}>
-				{enriching ? 'Enriching… (30s)' : 'Enrich Lead'}
+			<button class="enrich-btn" onclick={handleEnrich} disabled={enriching || deepEnriching} title="Quick scan: Yelp, website, email, social links (~10s)">
+				{enriching ? 'Scanning…' : 'Quick Scan'}
+			</button>
+			<button class="enrich-btn deep-btn" onclick={handleDeepEnrich} disabled={enriching || deepEnriching} title="Deep scan: everything + PageSpeed score + screenshot (~60s)">
+				{deepEnriching ? 'Deep scanning…' : 'Deep Scan'}
 			</button>
 			{#if lead.email}
 				<button class="email-btn" onclick={openEmailModal}>Send Email</button>
@@ -826,6 +845,16 @@
 	.enrich-btn:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
+	}
+
+	.deep-btn {
+		background: transparent;
+		border: 1px solid var(--accent);
+		color: var(--accent);
+	}
+
+	.deep-btn:hover:not(:disabled) {
+		background: rgba(var(--accent-rgb, 139, 92, 246), 0.12);
 	}
 
 	.email-btn {
