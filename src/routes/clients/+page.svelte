@@ -250,4 +250,11 @@
 		border: 1px solid var(--border-subtle);
 		font-size: 0.95rem;
 	}
+
+	@media (max-width: 768px) {
+		.page {
+			margin: 1rem auto;
+			padding: 0 1rem;
+		}
+	}
 </style>

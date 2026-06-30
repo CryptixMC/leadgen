@@ -231,4 +231,28 @@
 		font-size: 1rem !important;
 		padding: 4px 6px !important;
 	}
+
+	@media (max-width: 768px) {
+		.toolbar {
+			padding: 0.6rem 1rem;
+			gap: 0.5rem;
+		}
+
+		.filters {
+			flex-wrap: wrap;
+		}
+
+		select {
+			min-height: 44px;
+			flex: 1;
+		}
+
+		.geocode-btn {
+			min-height: 44px;
+		}
+
+		.map {
+			height: calc(100vh - 60px - 90px);
+		}
+	}
 </style>

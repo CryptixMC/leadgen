@@ -1174,4 +1174,71 @@
 		font-size: 0.775rem;
 		flex-shrink: 0;
 	}
+
+	@media (max-width: 768px) {
+		main {
+			padding: 1rem;
+		}
+
+		.back-row {
+			flex-wrap: wrap;
+			gap: 0.5rem;
+			margin-bottom: 1rem;
+		}
+
+		.back-actions {
+			flex-wrap: wrap;
+			width: 100%;
+		}
+
+		.back-actions button {
+			min-height: 44px;
+			flex: 1;
+		}
+
+		.lead-header {
+			flex-wrap: wrap;
+			margin-bottom: 1rem;
+		}
+
+		h1 {
+			font-size: 1.3rem;
+		}
+
+		.score-pill {
+			font-size: 2rem;
+		}
+
+		.card {
+			padding: 1rem;
+		}
+
+		.type-btn {
+			flex: 1;
+			text-align: center;
+			min-height: 44px;
+		}
+
+		.type-group {
+			flex-wrap: wrap;
+		}
+	}
+
+	@media (max-width: 480px) {
+		.back-actions button {
+			min-width: calc(50% - 0.25rem);
+		}
+
+		.modal-body {
+			padding: 1rem;
+		}
+
+		.modal-header {
+			padding: 1rem;
+		}
+
+		.modal-footer {
+			padding: 0.75rem 1rem;
+		}
+	}
 </style>
