@@ -440,6 +440,69 @@ async function extractContactFromSocialBio(
 	}
 }
 
+async function discoverWebsiteGoogle(
+	businessName: string,
+	address: string
+): Promise<{ websiteUrl: string | null; discoveredSocial: Record<string, string> }> {
+	const city = address.includes(',') ? address.split(',')[1].trim() : address;
+	const query = `${businessName} ${city}`;
+	const discoveredSocial: Record<string, string> = {};
+
+	try {
+		const url = `https://www.google.com/search?q=${encodeURIComponent(query)}&num=5`;
+		const resp = await fetch(url, {
+			headers: {
+				'User-Agent': BOT_UA,
+				'Accept-Language': 'en-US,en;q=0.9'
+			},
+			signal: withTimeout(8_000)
+		});
+		if (!resp.ok) return { websiteUrl: null, discoveredSocial };
+
+		const html = await resp.text();
+		const $ = cheerioLoad(html);
+
+		// Google encodes result URLs in various anchor formats; scan all hrefs for /url?q= pattern
+		for (const el of $('a[href]').toArray()) {
+			const raw = $(el).attr('href') ?? '';
+			let href = raw;
+
+			// Google wraps links as /url?q=<encoded-url>&...
+			if (raw.startsWith('/url?')) {
+				try {
+					href = new URL('https://www.google.com' + raw).searchParams.get('q') ?? '';
+				} catch {
+					continue;
+				}
+			}
+
+			if (!href.startsWith('http')) continue;
+
+			let domain: string;
+			try {
+				domain = new URL(href).hostname.toLowerCase().replace(/^www\./, '');
+			} catch {
+				continue;
+			}
+
+			// Skip Google itself and known directories
+			if (domain === 'google.com' || domain.endsWith('.google.com')) continue;
+			if ([...DIRECTORY_DOMAINS].some((d) => domain === d || domain.endsWith('.' + d))) continue;
+
+			if (isSocialMediaUrl(href)) {
+				const platform = getSocialPlatform(href);
+				if (platform && !discoveredSocial[platform]) discoveredSocial[platform] = href;
+				continue;
+			}
+
+			return { websiteUrl: href, discoveredSocial };
+		}
+	} catch {
+		// ignore
+	}
+	return { websiteUrl: null, discoveredSocial };
+}
+
 export async function resolveFinalUrl(url: string): Promise<string> {
 	try {
 		const resp = await fetch(url, {
@@ -466,6 +529,13 @@ export async function runEnrichment(lead: Record<string, unknown>, { deep = fals
 
 	let websiteUrl = lead.website_url as string | null;
 	let websiteInferred = Boolean(lead.website_inferred);
+
+	// Capture any social URL that was listed as the GBP website (scraper saves it here)
+	const gbpSocial = lead.gbp_social_url as string | null;
+	if (gbpSocial) {
+		const platform = getSocialPlatform(gbpSocial);
+		if (platform && !enrichment[`${platform}_url`]) enrichment[`${platform}_url`] = gbpSocial;
+	}
 
 	if (isSocialMediaUrl(websiteUrl)) {
 		const platform = getSocialPlatform(websiteUrl);
@@ -501,6 +571,22 @@ export async function runEnrichment(lead: Record<string, unknown>, { deep = fals
 		for (const [platform, url] of Object.entries(discoveredSocial)) {
 			if (!enrichment[`${platform}_url`]) enrichment[`${platform}_url`] = url;
 		}
+
+		// Deep mode: try Google as a fallback if DuckDuckGo found nothing
+		if (!websiteUrl && deep) {
+			const { websiteUrl: googleUrl, discoveredSocial: googleSocial } = await discoverWebsiteGoogle(biz, addr);
+			if (googleUrl) {
+				websiteUrl = googleUrl;
+				websiteInferred = true;
+				enrichment.website_url = websiteUrl;
+				// Flag that this site came from Google search — may not be the right business
+				enrichment.website_source = 'google_search';
+			}
+			for (const [platform, url] of Object.entries(googleSocial)) {
+				if (!enrichment[`${platform}_url`]) enrichment[`${platform}_url`] = url;
+			}
+		}
+
 		enrichment.website_inferred = websiteInferred;
 	}
 

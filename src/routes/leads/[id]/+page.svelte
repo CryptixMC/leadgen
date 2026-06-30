@@ -281,7 +281,9 @@
 						<a href={lead.website_url} target="_blank" rel="noopener noreferrer" class="contact-link">
 							{lead.website_url}
 						</a>
-						{#if lead.website_inferred}
+						{#if lead.website_source === 'google_search'}
+							<span class="inferred-warn">Found via Google search — verify this is the right business</span>
+						{:else if lead.website_inferred}
 							<span class="inferred-warn">Not on Google profile — may be inaccurate</span>
 						{/if}
 					{:else}

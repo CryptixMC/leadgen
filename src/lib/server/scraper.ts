@@ -124,7 +124,10 @@ async function upsertPlace(place: Record<string, unknown>, apiKey: string): Prom
 	const detail = (detailData.result as Record<string, unknown>) ?? {};
 
 	let website = (detail.website as string) || (place.website as string) || null;
-	if (isSocialMediaUrl(website)) website = null;
+	// If the GBP "website" field is actually a social media profile, capture it properly
+	// instead of discarding it — enrichment will move it to the right platform field.
+	const gbpSocialUrl = website && isSocialMediaUrl(website) ? website : null;
+	if (gbpSocialUrl) website = null;
 	const hasWebsite = Boolean(website);
 	const hasHttps = website ? website.startsWith('https://') : false;
 
@@ -179,6 +182,7 @@ async function upsertPlace(place: Record<string, unknown>, apiKey: string): Prom
 		address,
 		phone: (detail.formatted_phone_number as string) || '',
 		website_url: website,
+		gbp_social_url: gbpSocialUrl,
 		google_place_id: placeId,
 		google_rating: (detail.rating as number) || (place.rating as number) || 0,
 		review_count:
