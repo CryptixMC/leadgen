@@ -145,6 +145,7 @@ export async function runScrape(
 	const sem = new Semaphore(8);
 
 	const upsertSafe = async (place: Record<string, unknown>): Promise<boolean> => {
+		if (!isCommercialPlace(place)) return false;
 		await sem.acquire();
 		try {
 			return await upsertPlace(place, apiKey);
@@ -154,6 +155,38 @@ export async function runScrape(
 	};
 
 	const allBusinesses = !category || category === '*';
+
+	// Types that indicate a non-commercial place — filter these out in "all businesses" mode
+	const NON_BUSINESS_TYPES = new Set([
+		'tourist_attraction',
+		'natural_feature',
+		'park',
+		'route',
+		'political',
+		'transit_station',
+		'train_station',
+		'bus_station',
+		'subway_station',
+		'airport',
+		'stadium',
+		'amusement_park',
+		'cemetery',
+		'city_hall',
+		'courthouse',
+		'embassy',
+		'fire_station',
+		'funeral_home',
+		'library',
+		'local_government_office',
+		'police',
+		'post_office'
+	]);
+
+	function isCommercialPlace(place: Record<string, unknown>): boolean {
+		if (!allBusinesses) return true;
+		const types = (place.types as string[]) ?? [];
+		return !types.some((t) => NON_BUSINESS_TYPES.has(t));
+	}
 
 	// Build the text search query — neighborhood-scoped if provided
 	const locationLabel = neighborhood ? `${neighborhood}, ${city}` : city;
