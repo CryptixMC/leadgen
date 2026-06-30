@@ -2,6 +2,7 @@ import { error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
 import { requireAuth } from '$lib/server/auth';
+import { DEMO_LEADS } from '$lib/demo/data';
 
 const TSV_COLUMNS = [
 	'id', 'business_name', 'address', 'phone', 'website_url', 'email',
@@ -13,6 +14,22 @@ const TSV_COLUMNS = [
 ];
 
 export const GET: RequestHandler = async ({ locals }) => {
+	if (locals.demo) {
+		const rows = [...DEMO_LEADS].sort((a, b) => (b.lead_score ?? 0) - (a.lead_score ?? 0));
+		const lines = [
+			TSV_COLUMNS.join('\t'),
+			...rows.map((r) =>
+				TSV_COLUMNS.map((col) => String((r as unknown as Record<string, unknown>)[col] ?? '')).join('\t')
+			)
+		];
+		return new Response(lines.join('\n'), {
+			headers: {
+				'Content-Type': 'text/tab-separated-values',
+				'Content-Disposition': 'attachment; filename=leads-demo.tsv'
+			}
+		});
+	}
+
 	requireAuth(locals);
 	const { data, error: err } = await db
 		.from('leads')

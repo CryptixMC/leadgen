@@ -2,8 +2,15 @@ import { error, redirect, fail } from '@sveltejs/kit';
 import { db } from '$lib/server/db';
 import { requireAuth } from '$lib/server/auth';
 import type { PageServerLoad, Actions } from './$types';
+import { DEMO_CLIENTS } from '$lib/demo/data';
 
 export const load: PageServerLoad = async ({ locals, params }) => {
+	if (locals.demo) {
+		const client = DEMO_CLIENTS.find((c) => c.id === params.id);
+		if (!client) throw error(404, 'Client not found');
+		return { client };
+	}
+
 	requireAuth(locals);
 	const { data, error: err } = await db
 		.from('clients')
@@ -16,6 +23,8 @@ export const load: PageServerLoad = async ({ locals, params }) => {
 
 export const actions: Actions = {
 	save: async ({ locals, params, request }) => {
+		if (locals.demo) return { success: true };
+
 		requireAuth(locals);
 		const form = await request.formData();
 
@@ -43,6 +52,8 @@ export const actions: Actions = {
 	},
 
 	delete: async ({ locals, params }) => {
+		if (locals.demo) throw redirect(303, '/clients');
+
 		requireAuth(locals);
 		const { error: err } = await db.from('clients').delete().eq('id', params.id);
 		if (err) return fail(500, { error: err.message });

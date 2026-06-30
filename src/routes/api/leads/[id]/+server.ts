@@ -2,8 +2,15 @@ import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
 import { requireAuth } from '$lib/server/auth';
+import { DEMO_LEADS } from '$lib/demo/data';
 
 export const GET: RequestHandler = async ({ locals, params }) => {
+	if (locals.demo) {
+		const lead = DEMO_LEADS.find((l) => l.id === params.id);
+		if (!lead) throw error(404, 'Lead not found');
+		return json(lead);
+	}
+
 	requireAuth(locals);
 	const { data, error: err } = await db
 		.from('leads')
@@ -15,6 +22,12 @@ export const GET: RequestHandler = async ({ locals, params }) => {
 };
 
 export const PATCH: RequestHandler = async ({ locals, params, request }) => {
+	if (locals.demo) {
+		const lead = DEMO_LEADS.find((l) => l.id === params.id);
+		if (!lead) throw error(404, 'Lead not found');
+		return json(lead);
+	}
+
 	requireAuth(locals);
 	const payload = await request.json();
 	const updateData: Record<string, unknown> = {};
@@ -52,6 +65,8 @@ export const PATCH: RequestHandler = async ({ locals, params, request }) => {
 };
 
 export const DELETE: RequestHandler = async ({ locals, params }) => {
+	if (locals.demo) return new Response(null, { status: 204 });
+
 	requireAuth(locals);
 	await db.from('leads').delete().eq('id', params.id);
 	return new Response(null, { status: 204 });

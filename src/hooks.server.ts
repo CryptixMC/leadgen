@@ -14,5 +14,8 @@ export const handle: Handle = async ({ event, resolve }) => {
 			event.locals.user = data.user;
 		}
 	}
+	if (event.cookies.get('demo') === '1') {
+		event.locals.demo = true;
+	}
 	return resolve(event);
 };

@@ -6,6 +6,8 @@ import { generateEmail } from '$lib/server/gemini';
 import { fillTemplate } from '$lib/emailTemplates';
 
 export const POST: RequestHandler = async ({ locals, params, request }) => {
+	if (locals.demo) return json({ subject: 'Demo mode — email generation disabled', body: '' });
+
 	requireAuth(locals);
 
 	const { data: lead, error: dbErr } = await db

@@ -7,6 +7,8 @@ import { calculateScore } from '$lib/server/scoring';
 import { Semaphore } from '$lib/server/scraper';
 
 export const POST: RequestHandler = async ({ locals }) => {
+	if (locals.demo) return json({ rescored: 0 });
+
 	requireAuth(locals);
 	const { data: leads, error: err } = await db.from('leads').select('*');
 	if (err) throw error(500, err.message);

@@ -6,6 +6,8 @@ import { runEnrichment } from '$lib/server/enrichment';
 import { calculateScore } from '$lib/server/scoring';
 
 export const POST: RequestHandler = async ({ locals, params }) => {
+	if (locals.demo) return json({ ok: true });
+
 	requireAuth(locals);
 	const { data: lead, error: err } = await db
 		.from('leads')

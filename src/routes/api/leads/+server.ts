@@ -3,8 +3,18 @@ import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
 import { requireAuth } from '$lib/server/auth';
 import { calculateScore } from '$lib/server/scoring';
+import { DEMO_LEADS } from '$lib/demo/data';
 
 export const GET: RequestHandler = async ({ locals, url }) => {
+	if (locals.demo) {
+		const status = url.searchParams.get('status');
+		const priority = url.searchParams.get('priority');
+		let leads = DEMO_LEADS.filter((l) => !l.hidden);
+		if (status) leads = leads.filter((l) => l.status === status);
+		if (priority) leads = leads.filter((l) => l.priority === priority);
+		return json(leads);
+	}
+
 	requireAuth(locals);
 	let query = db.from('leads').select('*').order('lead_score', { ascending: false });
 	const status = url.searchParams.get('status');
@@ -19,6 +29,8 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 };
 
 export const POST: RequestHandler = async ({ locals, request }) => {
+	if (locals.demo) return json({ ok: true }, { status: 201 });
+
 	requireAuth(locals);
 	const payload = await request.json();
 	const now = new Date().toISOString();
@@ -52,6 +64,8 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 };
 
 export const PATCH: RequestHandler = async ({ locals, request }) => {
+	if (locals.demo) return json({ ok: true });
+
 	requireAuth(locals);
 	const { ids, hidden } = await request.json();
 	if (!ids?.length) throw error(400, 'No IDs provided');
@@ -65,6 +79,8 @@ export const PATCH: RequestHandler = async ({ locals, request }) => {
 };
 
 export const DELETE: RequestHandler = async ({ locals, request }) => {
+	if (locals.demo) return json({ ok: true });
+
 	requireAuth(locals);
 	const { ids } = await request.json();
 	if (!ids?.length) throw error(400, 'No IDs provided');
