@@ -22,25 +22,27 @@
 	let invoiceNumber = $state('INV-001');
 	let issueDate = $state(todayStr());
 	let dueDate = $state(futureDateStr(14));
-	let lineItems = $state([{ description: '', amount: 0 }]);
-	let taxAmount = $state(0);
-	let invoicePaymentTerms = $state('E-transfer to liam@liamnicholson.ca');
+	let lineItems = $state([{ description: '', qty: 1, rate: 0 }]);
+	let taxRate = $state(5);
+	let taxLabel = $state('GST (5%)');
+	let invoicePaymentTerms = $state('Payment accepted via e-transfer to liam@liamnicholson.ca — please include invoice number in the memo. Net 15 from invoice date.');
 	let generatingInvoice = $state(false);
 
-	let subtotal = $derived(lineItems.reduce((sum, item) => sum + (Number(item.amount) || 0), 0));
-	let total = $derived(subtotal + (Number(taxAmount) || 0));
+	let subtotal = $derived(lineItems.reduce((sum, item) => sum + (Number(item.qty) || 0) * (Number(item.rate) || 0), 0));
+	let taxAmount = $derived(subtotal * ((Number(taxRate) || 0) / 100));
+	let total = $derived(subtotal + taxAmount);
 
 	function addLineItem() {
-		lineItems = [...lineItems, { description: '', amount: 0 }];
+		lineItems = [...lineItems, { description: '', qty: 1, rate: 0 }];
 	}
 
 	function removeLineItem(i: number) {
 		lineItems = lineItems.filter((_, idx) => idx !== i);
 	}
 
-	function updateItem(i: number, field: 'description' | 'amount', value: string) {
+	function updateItem(i: number, field: 'description' | 'qty' | 'rate', value: string) {
 		lineItems = lineItems.map((item, idx) =>
-			idx === i ? { ...item, [field]: field === 'amount' ? parseFloat(value) || 0 : value } : item
+			idx === i ? { ...item, [field]: field === 'description' ? value : parseFloat(value) || 0 } : item
 		);
 	}
 
@@ -53,10 +55,10 @@
 				dueDate,
 				clientName: client.business_name,
 				clientAddress: client.address ?? '',
-				lineItems: lineItems.map((li) => ({ description: li.description, amount: Number(li.amount) || 0 })),
-				subtotal,
-				tax: Number(taxAmount) || 0,
-				total,
+				clientEmail: client.email ?? undefined,
+				lineItems: lineItems.map((li) => ({ description: li.description, qty: Number(li.qty) || 0, rate: Number(li.rate) || 0 })),
+				taxRate: Number(taxRate) || 0,
+				taxLabel,
 				paymentTerms: invoicePaymentTerms
 			});
 			triggerDownload(bytes, `INV-${invoiceNumber}-${client.business_name.replace(/\s+/g, '-')}.pdf`);
@@ -226,8 +228,12 @@
 					<input type="date" bind:value={dueDate} />
 				</div>
 				<div class="field">
-					<label>Tax Amount ($)</label>
-					<input type="number" min="0" step="0.01" bind:value={taxAmount} placeholder="0" />
+					<label>Tax Rate (%)</label>
+					<input type="number" min="0" step="0.01" bind:value={taxRate} placeholder="5" />
+				</div>
+				<div class="field">
+					<label>Tax Label</label>
+					<input type="text" bind:value={taxLabel} placeholder="GST (5%)" />
 				</div>
 				<div class="field full">
 					<label>Payment Terms</label>
@@ -238,7 +244,8 @@
 			<div class="line-items">
 				<div class="line-items-header">
 					<span class="col-desc">Description</span>
-					<span class="col-amt">Amount ($)</span>
+					<span class="col-qty">Qty</span>
+					<span class="col-rate">Rate ($)</span>
 					<span class="col-rm"></span>
 				</div>
 				{#each lineItems as item, i}
@@ -251,13 +258,22 @@
 							oninput={(e) => updateItem(i, 'description', (e.target as HTMLInputElement).value)}
 						/>
 						<input
-							class="col-amt"
+							class="col-qty"
+							type="number"
+							min="0"
+							step="1"
+							value={item.qty}
+							placeholder="1"
+							oninput={(e) => updateItem(i, 'qty', (e.target as HTMLInputElement).value)}
+						/>
+						<input
+							class="col-rate"
 							type="number"
 							min="0"
 							step="0.01"
-							value={item.amount}
+							value={item.rate}
 							placeholder="0.00"
-							oninput={(e) => updateItem(i, 'amount', (e.target as HTMLInputElement).value)}
+							oninput={(e) => updateItem(i, 'rate', (e.target as HTMLInputElement).value)}
 						/>
 						<button
 							class="btn-remove"
@@ -272,8 +288,8 @@
 
 			<div class="totals">
 				<span>Subtotal</span><span>${subtotal.toFixed(2)}</span>
-				{#if Number(taxAmount) > 0}
-					<span>Tax</span><span>${Number(taxAmount).toFixed(2)}</span>
+				{#if taxAmount > 0}
+					<span>{taxLabel}</span><span>${taxAmount.toFixed(2)}</span>
 				{/if}
 				<span class="total-label">Total</span><span class="total-value">${total.toFixed(2)}</span>
 			</div>
@@ -591,7 +607,8 @@
 	}
 
 	.col-desc { flex: 1; }
-	.col-amt  { width: 130px; }
+	.col-qty  { width: 70px; }
+	.col-rate { width: 110px; }
 	.col-rm   { width: 28px; }
 
 	.btn-remove {
