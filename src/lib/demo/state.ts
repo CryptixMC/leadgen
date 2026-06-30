@@ -12,11 +12,15 @@ export function enterDemo(): void {
 	}
 }
 
-export function exitDemo(): void {
+export function clearDemo(): void {
 	demoMode.set(false);
 	if (browser) {
 		sessionStorage.removeItem('demo');
 		document.cookie = 'demo=; path=/; max-age=0; SameSite=Lax';
 	}
+}
+
+export function exitDemo(): void {
+	clearDemo();
 	goto('/login');
 }
