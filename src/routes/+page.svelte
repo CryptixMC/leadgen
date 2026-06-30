@@ -118,7 +118,7 @@
 
 	function selectNonEnriched() {
 		const next = new Set(selected);
-		filtered.filter((l) => l.also_on_yelp === null).forEach((l) => next.add(l.id));
+		filtered.filter((l) => l.lead_score === null).forEach((l) => next.add(l.id));
 		selected = next;
 	}
 
