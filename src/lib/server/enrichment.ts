@@ -430,7 +430,6 @@ export async function runEnrichment(lead: Record<string, unknown>): Promise<Reco
 			pagespeed_mobile: null,
 			pagespeed_desktop: null,
 			mobile_friendly: null,
-			website_screenshot: null,
 			pagespeed_seo: null,
 			pagespeed_best_practices: null
 		});
