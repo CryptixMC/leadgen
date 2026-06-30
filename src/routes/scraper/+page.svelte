@@ -42,7 +42,7 @@
 
 	async function handleSubmit(e: Event) {
 		e.preventDefault();
-		if (!category.trim()) return;
+		if (!allBusinesses && !category.trim()) return;
 
 		loading = true;
 		error = '';
