@@ -342,6 +342,167 @@ export async function scrapeWebsite(url: string, { subpages = true } = {}): Prom
 	return result;
 }
 
+const PHONE_RE = /\(?\d{3}\)?[\s\-\.]\d{3}[\s\-\.]\d{4}/g;
+
+async function searchSocialProfiles(
+	businessName: string,
+	address: string,
+	existingSocials: Record<string, unknown>
+): Promise<Record<string, string>> {
+	const city = address.includes(',') ? address.split(',')[1].trim() : address;
+	const query = `"${businessName}" "${city}" instagram OR facebook OR twitter OR tiktok`;
+	const found: Record<string, string> = {};
+
+	try {
+		const resp = await fetch(DDG_SEARCH_URL, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': BOT_UA },
+			body: new URLSearchParams({ q: query, b: '' }),
+			signal: withTimeout(8_000)
+		});
+		if (!resp.ok) return found;
+
+		const html = await resp.text();
+		const $ = cheerioLoad(html);
+
+		for (const el of $('a.result__url, a.result__a').toArray()) {
+			let href = $(el).attr('href') ?? '';
+			if (!href || href.startsWith('//duckduckgo')) continue;
+			if (!href.startsWith('http')) href = 'https://' + href.replace(/^\/+/, '');
+
+			const platform = getSocialPlatform(href);
+			if (platform && !existingSocials[`${platform}_url`] && !found[platform]) {
+				found[platform] = href;
+			}
+		}
+	} catch {
+		// ignore
+	}
+	return found;
+}
+
+async function extractContactFromSocialBio(
+	platform: string,
+	url: string
+): Promise<{ email?: string; phone?: string }> {
+	if (platform === 'linkedin') return {};
+
+	try {
+		const resp = await fetch(url, {
+			headers: { 'User-Agent': BOT_UA },
+			signal: withTimeout(7_000)
+		});
+		if (!resp.ok) return {};
+
+		const html = await resp.text();
+		const $ = cheerioLoad(html);
+
+		// Collect candidate text sources: og:description bio, mailto/tel links, page text
+		const sources: string[] = [];
+
+		const ogDesc = $('meta[property="og:description"]').attr('content') ?? '';
+		if (ogDesc) sources.push(ogDesc);
+
+		$('a[href]').each((_, el) => {
+			const href = $(el).attr('href') ?? '';
+			if (href.startsWith('mailto:')) sources.push(href.slice(7).split('?')[0].trim());
+			if (href.startsWith('tel:')) sources.push(href.slice(4).trim());
+		});
+
+		// Also scan visible page text for contacts embedded in bios
+		sources.push($.text());
+
+		let email: string | undefined;
+		let phone: string | undefined;
+
+		for (const src of sources) {
+			if (!email) {
+				EMAIL_RE.lastIndex = 0;
+				const m = EMAIL_RE.exec(src);
+				if (m) {
+					const candidate = m[0];
+					if (!EMAIL_EXCLUDE_EXTS.has(candidate.toLowerCase().replace(/.*(\.[^.]+)$/, '$1'))) {
+						email = candidate;
+					}
+				}
+			}
+			if (!phone) {
+				PHONE_RE.lastIndex = 0;
+				const m = PHONE_RE.exec(src);
+				if (m) phone = m[0];
+			}
+			if (email && phone) break;
+		}
+
+		return { email, phone };
+	} catch {
+		return {};
+	}
+}
+
+async function discoverWebsiteGoogle(
+	businessName: string,
+	address: string
+): Promise<{ websiteUrl: string | null; discoveredSocial: Record<string, string> }> {
+	const city = address.includes(',') ? address.split(',')[1].trim() : address;
+	const query = `${businessName} ${city}`;
+	const discoveredSocial: Record<string, string> = {};
+
+	try {
+		const url = `https://www.google.com/search?q=${encodeURIComponent(query)}&num=5`;
+		const resp = await fetch(url, {
+			headers: {
+				'User-Agent': BOT_UA,
+				'Accept-Language': 'en-US,en;q=0.9'
+			},
+			signal: withTimeout(8_000)
+		});
+		if (!resp.ok) return { websiteUrl: null, discoveredSocial };
+
+		const html = await resp.text();
+		const $ = cheerioLoad(html);
+
+		// Google encodes result URLs in various anchor formats; scan all hrefs for /url?q= pattern
+		for (const el of $('a[href]').toArray()) {
+			const raw = $(el).attr('href') ?? '';
+			let href = raw;
+
+			// Google wraps links as /url?q=<encoded-url>&...
+			if (raw.startsWith('/url?')) {
+				try {
+					href = new URL('https://www.google.com' + raw).searchParams.get('q') ?? '';
+				} catch {
+					continue;
+				}
+			}
+
+			if (!href.startsWith('http')) continue;
+
+			let domain: string;
+			try {
+				domain = new URL(href).hostname.toLowerCase().replace(/^www\./, '');
+			} catch {
+				continue;
+			}
+
+			// Skip Google itself and known directories
+			if (domain === 'google.com' || domain.endsWith('.google.com')) continue;
+			if ([...DIRECTORY_DOMAINS].some((d) => domain === d || domain.endsWith('.' + d))) continue;
+
+			if (isSocialMediaUrl(href)) {
+				const platform = getSocialPlatform(href);
+				if (platform && !discoveredSocial[platform]) discoveredSocial[platform] = href;
+				continue;
+			}
+
+			return { websiteUrl: href, discoveredSocial };
+		}
+	} catch {
+		// ignore
+	}
+	return { websiteUrl: null, discoveredSocial };
+}
+
 export async function resolveFinalUrl(url: string): Promise<string> {
 	try {
 		const resp = await fetch(url, {
@@ -368,6 +529,13 @@ export async function runEnrichment(lead: Record<string, unknown>, { deep = fals
 
 	let websiteUrl = lead.website_url as string | null;
 	let websiteInferred = Boolean(lead.website_inferred);
+
+	// Capture any social URL that was listed as the GBP website (scraper saves it here)
+	const gbpSocial = lead.gbp_social_url as string | null;
+	if (gbpSocial) {
+		const platform = getSocialPlatform(gbpSocial);
+		if (platform && !enrichment[`${platform}_url`]) enrichment[`${platform}_url`] = gbpSocial;
+	}
 
 	if (isSocialMediaUrl(websiteUrl)) {
 		const platform = getSocialPlatform(websiteUrl);
@@ -403,6 +571,22 @@ export async function runEnrichment(lead: Record<string, unknown>, { deep = fals
 		for (const [platform, url] of Object.entries(discoveredSocial)) {
 			if (!enrichment[`${platform}_url`]) enrichment[`${platform}_url`] = url;
 		}
+
+		// Deep mode: try Google as a fallback if DuckDuckGo found nothing
+		if (!websiteUrl && deep) {
+			const { websiteUrl: googleUrl, discoveredSocial: googleSocial } = await discoverWebsiteGoogle(biz, addr);
+			if (googleUrl) {
+				websiteUrl = googleUrl;
+				websiteInferred = true;
+				enrichment.website_url = websiteUrl;
+				// Flag that this site came from Google search — may not be the right business
+				enrichment.website_source = 'google_search';
+			}
+			for (const [platform, url] of Object.entries(googleSocial)) {
+				if (!enrichment[`${platform}_url`]) enrichment[`${platform}_url`] = url;
+			}
+		}
+
 		enrichment.website_inferred = websiteInferred;
 	}
 
@@ -445,6 +629,37 @@ export async function runEnrichment(lead: Record<string, unknown>, { deep = fals
 			pagespeed_best_practices: null
 		});
 		Object.assign(enrichment, yelp);
+	}
+
+	// Deep mode: targeted social discovery + social bio contact extraction
+	if (deep) {
+		// Find social profiles not yet discovered via website scrape / DDG website search
+		const newSocials = await searchSocialProfiles(biz, addr, { ...lead, ...enrichment });
+		for (const [platform, url] of Object.entries(newSocials)) {
+			if (!enrichment[`${platform}_url`] && !lead[`${platform}_url`]) {
+				enrichment[`${platform}_url`] = url;
+			}
+		}
+
+		// If still missing email or phone, scrape social bios (Instagram first — most likely to have it)
+		const needEmail = !enrichment.email && !lead.email;
+		const needPhone = !phone && !(enrichment as Record<string, unknown>).phone;
+		if (needEmail || needPhone) {
+			const socialOrder = ['instagram_url', 'facebook_url', 'twitter_url', 'tiktok_url', 'youtube_url'];
+			for (const field of socialOrder) {
+				const profileUrl = (enrichment[field] ?? lead[field]) as string | null;
+				if (!profileUrl) continue;
+				const platform = getSocialPlatform(profileUrl);
+				if (!platform) continue;
+
+				const contact = await extractContactFromSocialBio(platform, profileUrl);
+				if (needEmail && contact.email && !enrichment.email) enrichment.email = contact.email;
+				if (needPhone && contact.phone && !(enrichment as Record<string, unknown>).phone) {
+					(enrichment as Record<string, unknown>).phone = contact.phone;
+				}
+				if ((!needEmail || enrichment.email) && (!needPhone || (enrichment as Record<string, unknown>).phone)) break;
+			}
+		}
 	}
 
 	// Compute social activity score: count of non-null social channels

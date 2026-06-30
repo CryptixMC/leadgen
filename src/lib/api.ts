@@ -26,6 +26,7 @@ export interface Lead {
 	youtube_url: string | null;
 	email: string | null;
 	website_inferred: boolean | null;
+	website_source: string | null;
 	website_screenshot: string | null;
 	pagespeed_seo: number | null;
 	pagespeed_best_practices: number | null;
