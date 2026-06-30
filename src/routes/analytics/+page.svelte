@@ -7,11 +7,23 @@
 		PointElement,
 		LineElement,
 		BarElement,
+		LineController,
+		BarController,
 		Tooltip,
 		Legend
 	} from 'chart.js';
 
-	Chart.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Tooltip, Legend);
+	Chart.register(
+		CategoryScale,
+		LinearScale,
+		PointElement,
+		LineElement,
+		BarElement,
+		LineController,
+		BarController,
+		Tooltip,
+		Legend
+	);
 
 	let { data } = $props();
 
