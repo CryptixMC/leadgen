@@ -7,6 +7,42 @@ const PLACES_NEARBY_URL = 'https://maps.googleapis.com/maps/api/place/nearbysear
 const PLACES_DETAIL_URL = 'https://maps.googleapis.com/maps/api/place/details/json';
 const DETAIL_FIELDS = 'name,formatted_address,formatted_phone_number,website,rating,user_ratings_total,opening_hours,price_level,reviews';
 
+// Place types that are not serviceable small businesses
+const NON_BUSINESS_TYPES = new Set([
+	'tourist_attraction',
+	'natural_feature',
+	'park',
+	'campground',
+	'cemetery',
+	'amusement_park',
+	'zoo',
+	'aquarium',
+	'museum',
+	'stadium',
+	'airport',
+	'train_station',
+	'transit_station',
+	'bus_station',
+	'subway_station',
+	'light_rail_station',
+	'ferry_terminal',
+	'route',
+	'political',
+	'locality',
+	'sublocality',
+	'neighborhood',
+	'colloquial_area',
+	'country',
+	'administrative_area_level_1',
+	'administrative_area_level_2',
+	'administrative_area_level_3',
+	'premise',
+	'street_address',
+	'intersection',
+	'postal_code',
+	'landmark',
+]);
+
 export class Semaphore {
 	private queue: Array<() => void> = [];
 	constructor(private permits: number) {}
@@ -74,6 +110,10 @@ async function fetchNearbyPage(
 async function upsertPlace(place: Record<string, unknown>, apiKey: string): Promise<boolean> {
 	const placeId = place.place_id as string | undefined;
 	if (!placeId) return false;
+
+	// Skip attractions, parks, transit stops, and other non-business place types
+	const types = (place.types as string[] | undefined) ?? [];
+	if (types.some((t) => NON_BUSINESS_TYPES.has(t))) return false;
 
 	const detailData = await getWithBackoff(PLACES_DETAIL_URL, {
 		place_id: placeId,
