@@ -269,6 +269,9 @@
 					{deleting ? 'Deleting…' : `Delete ${selected.size} selected`}
 				</button>
 			{/if}
+			<button class="select-all-btn" onclick={toggleSelectAll}>
+				{allFilteredSelected ? 'Deselect all' : 'Select all'}
+			</button>
 			<button class="select-unenriched-btn" onclick={selectNonEnriched}>
 				Select unenriched
 			</button>
@@ -319,8 +322,8 @@
 						onclick={() => (window.location.href = `/leads/${lead.id}`)}
 						class:row-selected={selected.has(lead.id)}
 					>
-						<td class="check-col" onclick={(e) => toggleSelect(lead.id, e)}>
-							<input type="checkbox" checked={selected.has(lead.id)} onclick={(e) => e.stopPropagation()} />
+						<td class="check-col">
+							<input type="checkbox" checked={selected.has(lead.id)} onclick={(e) => toggleSelect(lead.id, e)} />
 						</td>
 						<td class="name">
 							{lead.business_name}
@@ -588,6 +591,7 @@
 		margin-left: auto;
 	}
 
+	.select-all-btn,
 	.select-unenriched-btn {
 		background: transparent;
 		border: 1px solid var(--border-subtle);
@@ -600,6 +604,7 @@
 		transition: border-color var(--dur-fast), color var(--dur-fast);
 	}
 
+	.select-all-btn:hover,
 	.select-unenriched-btn:hover {
 		border-color: var(--accent-primary);
 		color: var(--text-primary);
