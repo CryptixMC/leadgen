@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { supabase } from '$lib/supabase.js';
 	import { goto } from '$app/navigation';
+	import favicon from '$lib/assets/favicon.svg';
 
 	let email = $state('');
 	let password = $state('');
@@ -36,8 +37,12 @@
 
 <main>
 	<div class="card">
-		<h1>LeadGen</h1>
-		<p class="sub">Sign in to continue</p>
+		<div class="logo-mark">
+			<img src={favicon} alt="LN." class="mark-img" />
+		</div>
+		<div class="eyebrow">// sign in to continue</div>
+		<h1>LeadGen.</h1>
+		<p class="sub">Liam Nicholson · Internal tool</p>
 
 		<form onsubmit={handleSubmit}>
 			<div class="field">
@@ -87,26 +92,50 @@
 	}
 
 	.card {
-		background: #10101a;
-		border: 1px solid #1a1a2e;
-		border-radius: 12px;
-		padding: 2rem;
+		background: rgba(17, 17, 24, 0.92);
+		border: 1px solid var(--border-subtle);
+		border-radius: var(--radius-lg);
+		padding: 2.5rem 2.25rem;
 		width: 100%;
-		max-width: 360px;
+		max-width: 380px;
+	}
+
+	.logo-mark {
+		display: flex;
+		justify-content: center;
+		margin-bottom: 1.5rem;
+	}
+
+	.mark-img {
+		width: 52px;
+		height: 52px;
+		border-radius: 12px;
+	}
+
+	.eyebrow {
+		font-family: var(--font-display);
+		font-size: 0.67rem;
+		color: var(--text-muted);
+		letter-spacing: 0.15em;
+		text-transform: uppercase;
+		text-align: center;
+		margin-bottom: 0.45rem;
 	}
 
 	h1 {
-		font-size: 1.4rem;
-		color: #7c3aed;
-		margin-bottom: 0.25rem;
+		font-size: 1.5rem;
+		font-weight: 700;
+		color: var(--text-primary);
 		text-align: center;
+		letter-spacing: -0.02em;
+		margin-bottom: 0.3rem;
 	}
 
 	.sub {
-		color: #64748b;
-		font-size: 0.85rem;
+		color: var(--text-muted);
+		font-size: 0.875rem;
 		text-align: center;
-		margin-bottom: 1.75rem;
+		margin-bottom: 2rem;
 	}
 
 	.field {
@@ -117,30 +146,32 @@
 	}
 
 	label {
-		font-size: 0.8rem;
-		font-weight: 500;
-		color: #94a3b8;
+		font-family: var(--font-ui);
+		font-size: 0.72rem;
+		font-weight: 600;
+		color: var(--text-muted);
 		text-transform: uppercase;
-		letter-spacing: 0.05em;
+		letter-spacing: 0.12em;
 	}
 
 	input {
-		background: #13131f;
-		border: 1px solid #2a2a3e;
-		color: #e2e8f0;
-		padding: 0.6rem 0.8rem;
-		border-radius: 6px;
+		background: var(--bg-base);
+		border: 1px solid var(--border-subtle);
+		color: var(--text-primary);
+		padding: 0.6rem 0.85rem;
+		border-radius: var(--radius-sm);
 		outline: none;
 		width: 100%;
-		transition: border-color 0.15s;
+		transition: border-color var(--dur-fast);
 	}
 
 	input:focus {
-		border-color: #7c3aed;
+		border-color: var(--accent-primary);
 	}
 
 	input::placeholder {
-		color: #4a5568;
+		color: var(--text-muted);
+		opacity: 0.5;
 	}
 
 	input:disabled {
@@ -151,28 +182,29 @@
 		color: #f87171;
 		font-size: 0.82rem;
 		margin-bottom: 0.75rem;
-		background: #2a1a1a;
-		border: 1px solid #7f1d1d;
-		border-radius: 6px;
+		background: rgba(248, 113, 113, 0.08);
+		border: 1px solid rgba(248, 113, 113, 0.2);
+		border-radius: var(--radius-sm);
 		padding: 0.5rem 0.75rem;
 	}
 
 	button {
 		width: 100%;
-		background: #7c3aed;
+		background: var(--gradient-primary);
 		border: none;
-		color: #fff;
+		color: var(--bg-base);
 		padding: 0.65rem 1.25rem;
-		border-radius: 6px;
+		border-radius: var(--radius-pill);
 		cursor: pointer;
 		font-weight: 600;
 		font-size: 0.9rem;
 		margin-top: 0.5rem;
-		transition: background 0.15s;
+		transition: box-shadow var(--dur-fast), transform var(--dur-fast);
 	}
 
 	button:hover:not(:disabled) {
-		background: #6d28d9;
+		box-shadow: var(--glow-cta);
+		transform: translateY(-1px);
 	}
 
 	button:disabled {

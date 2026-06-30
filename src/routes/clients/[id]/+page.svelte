@@ -334,19 +334,20 @@
 
 	.back {
 		display: inline-block;
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.85rem;
 		margin-bottom: 1.25rem;
-		transition: color 0.15s;
+		transition: color var(--dur-fast);
+		text-decoration: none;
 	}
 
 	.back:hover {
-		color: #d946ef;
+		color: var(--accent-highlight);
 	}
 
 	h1 {
 		font-size: 1.5rem;
-		color: #f1f5f9;
+		color: var(--text-primary);
 		margin-bottom: 1.5rem;
 	}
 
@@ -365,21 +366,21 @@
 
 	.feedback {
 		padding: 0.6rem 1rem;
-		border-radius: 6px;
+		border-radius: var(--radius-sm);
 		font-size: 0.875rem;
 		margin-bottom: 1.25rem;
 	}
 
 	.feedback.success {
-		background: #14291a;
-		color: #4ade80;
-		border: 1px solid #166534;
+		background: rgba(45, 198, 83, 0.08);
+		color: var(--state-success);
+		border: 1px solid rgba(45, 198, 83, 0.25);
 	}
 
 	.feedback.error {
-		background: #2a1a1a;
+		background: rgba(248, 113, 113, 0.08);
 		color: #f87171;
-		border: 1px solid #7f1d1d;
+		border: 1px solid rgba(248, 113, 113, 0.2);
 	}
 
 	.form-grid {
@@ -404,11 +405,12 @@
 
 	label,
 	.services-label {
-		font-size: 0.75rem;
+		font-family: var(--font-ui);
+		font-size: 0.72rem;
 		font-weight: 600;
-		color: #64748b;
+		color: var(--text-muted);
 		text-transform: uppercase;
-		letter-spacing: 0.05em;
+		letter-spacing: 0.12em;
 	}
 
 	input[type='text'],
@@ -416,14 +418,14 @@
 	input[type='number'],
 	input[type='date'],
 	textarea {
-		background: #10101a;
-		border: 1px solid #1a1a2e;
-		border-radius: 6px;
-		color: #e2e8f0;
+		background: var(--bg-surface);
+		border: 1px solid var(--border-subtle);
+		border-radius: var(--radius-sm);
+		color: var(--text-primary);
 		padding: 0.5rem 0.75rem;
 		font-size: 0.9rem;
 		width: 100%;
-		transition: border-color 0.15s;
+		transition: border-color var(--dur-fast);
 	}
 
 	input[type='text']:focus,
@@ -432,7 +434,7 @@
 	input[type='date']:focus,
 	textarea:focus {
 		outline: none;
-		border-color: #7c3aed;
+		border-color: var(--accent-primary);
 	}
 
 	textarea {
@@ -450,15 +452,16 @@
 		align-items: center;
 		gap: 0.4rem;
 		font-size: 0.9rem;
-		color: #e2e8f0;
+		color: var(--text-primary);
 		text-transform: none;
 		letter-spacing: normal;
 		font-weight: 400;
 		cursor: pointer;
+		font-family: var(--font-body);
 	}
 
 	input[type='checkbox'] {
-		accent-color: #7c3aed;
+		accent-color: var(--accent-primary);
 		cursor: pointer;
 		width: 15px;
 		height: 15px;
@@ -469,19 +472,20 @@
 	}
 
 	.save-btn {
-		background: #7c3aed;
+		background: var(--gradient-primary);
 		border: none;
-		color: #fff;
+		color: var(--bg-base);
 		padding: 0.55rem 1.5rem;
-		border-radius: 6px;
+		border-radius: var(--radius-pill);
 		font-size: 0.9rem;
 		font-weight: 600;
 		cursor: pointer;
-		transition: background 0.15s;
+		transition: box-shadow var(--dur-fast), transform var(--dur-fast);
 	}
 
 	.save-btn:hover:not(:disabled) {
-		background: #6d28d9;
+		box-shadow: var(--glow-cta);
+		transform: translateY(-1px);
 	}
 
 	.save-btn:disabled {

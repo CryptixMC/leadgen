@@ -25,9 +25,9 @@
 	);
 
 	function markerColor(priority: string | null) {
-		if (priority === 'high') return { fill: '#e879f9', border: '#a21caf' };
+		if (priority === 'high') return { fill: '#D946EF', border: '#6B21A8' };
 		if (priority === 'medium') return { fill: '#818cf8', border: '#4f46e5' };
-		return { fill: '#64748b', border: '#334155' };
+		return { fill: '#9090B0', border: '#4a4a6e' };
 	}
 
 	function renderMarkers() {
@@ -39,24 +39,24 @@
 			const { fill, border } = markerColor(lead.priority);
 			const icon = L.divIcon({
 				className: '',
-				html: `<div style="width:14px;height:14px;background:${fill};border:2px solid ${border};border-radius:50%;box-shadow:0 0 6px ${fill}88;cursor:pointer;"></div>`,
+				html: `<div style="width:14px;height:14px;background:${fill};border:2px solid ${border};border-radius:50%;box-shadow:0 0 8px ${fill}88;cursor:pointer;"></div>`,
 				iconSize: [14, 14],
 				iconAnchor: [7, 7],
 				popupAnchor: [0, -10]
 			});
 			const marker = L.marker([lead.latitude!, lead.longitude!], { icon });
-			const priorityBadge = `<span style="background:${fill}22;color:${fill};padding:2px 6px;border-radius:4px;font-size:0.7rem;">${lead.priority ?? '—'}</span>`;
+			const priorityBadge = `<span style="background:${fill}22;color:${fill};padding:2px 6px;border-radius:100px;font-size:0.68rem;font-family:'Syne',sans-serif;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;">${lead.priority ?? '—'}</span>`;
 			marker.bindPopup(
 				L.popup({ maxWidth: 260 }).setContent(`
-					<div style="font-family:'DM Sans',sans-serif;color:#e2e8f0;background:#10101a;padding:0.5rem;">
-						<strong style="font-family:'JetBrains Mono',monospace;font-size:0.9rem;color:#f1f5f9;">${lead.business_name}</strong>
-						<p style="color:#94a3b8;font-size:0.75rem;margin:0.2rem 0;">${lead.address}</p>
-						<div style="display:flex;gap:0.4rem;margin:0.3rem 0;align-items:center;">
+					<div style="font-family:'DM Sans',sans-serif;color:#F5F0FF;background:#111118;padding:0.65rem 0.75rem;border-radius:8px;">
+						<strong style="font-family:'JetBrains Mono',monospace;font-size:0.9rem;color:#F5F0FF;letter-spacing:-0.02em;">${lead.business_name}</strong>
+						<p style="color:#9090B0;font-size:0.75rem;margin:0.25rem 0;">${lead.address}</p>
+						<div style="display:flex;gap:0.4rem;margin:0.35rem 0;align-items:center;">
 							${priorityBadge}
-							<span style="color:#64748b;font-size:0.7rem;">${lead.status}</span>
+							<span style="color:#9090B0;font-size:0.7rem;">${lead.status}</span>
 						</div>
-						<p style="color:#e879f9;font-family:'JetBrains Mono',monospace;font-size:1rem;font-weight:700;margin:0.2rem 0;">${lead.lead_score ?? '—'}</p>
-						<a href="/leads/${lead.id}" style="color:#7c3aed;font-size:0.8rem;">View details →</a>
+						<p style="color:#D946EF;font-family:'JetBrains Mono',monospace;font-size:1rem;font-weight:700;margin:0.2rem 0;">${lead.lead_score ?? '—'}</p>
+						<a href="/leads/${lead.id}" style="color:#7C3AED;font-size:0.8rem;">View details →</a>
 					</div>
 				`)
 			);
@@ -65,7 +65,6 @@
 	}
 
 	$effect(() => {
-		// Track reactive deps — filtered changes when statusFilter, priorityFilter, or leads change
 		void filtered;
 		renderMarkers();
 	});
@@ -139,15 +138,19 @@
 		align-items: center;
 		gap: 1rem;
 		padding: 0.75rem 2rem;
-		background: #0d0d1a;
-		border-bottom: 1px solid #1a1a2e;
+		background: rgba(10, 10, 15, 0.72);
+		backdrop-filter: blur(12px);
+		-webkit-backdrop-filter: blur(12px);
+		border-bottom: 1px solid var(--border-grid);
 		flex-wrap: wrap;
 	}
 
 	h1 {
-		font-size: 1rem;
-		color: #f1f5f9;
-		margin-right: 0.5rem;
+		font-family: var(--font-display);
+		font-size: 0.95rem;
+		font-weight: 700;
+		color: var(--text-primary);
+		letter-spacing: -0.02em;
 	}
 
 	.filters {
@@ -156,34 +159,40 @@
 	}
 
 	select {
-		background: #13131f;
-		border: 1px solid #2a2a3e;
-		color: #e2e8f0;
+		background: var(--bg-surface);
+		border: 1px solid var(--border-subtle);
+		color: var(--text-primary);
 		padding: 0.3rem 0.6rem;
-		border-radius: 6px;
+		border-radius: var(--radius-sm);
 		font-size: 0.85rem;
 		cursor: pointer;
+		outline: none;
+		transition: border-color var(--dur-fast);
+	}
+
+	select:focus {
+		border-color: var(--accent-primary);
 	}
 
 	.counts {
-		color: #64748b;
+		color: var(--text-muted);
 		font-size: 0.85rem;
 	}
 
 	.geocode-btn {
-		background: #1a1a2e;
-		border: 1px solid #7c3aed;
+		background: transparent;
+		border: 1px solid rgba(124, 58, 237, 0.35);
 		color: #a78bfa;
-		padding: 0.3rem 0.75rem;
-		border-radius: 6px;
+		padding: 0.3rem 0.85rem;
+		border-radius: var(--radius-pill);
 		font-size: 0.85rem;
 		cursor: pointer;
-		transition: border-color 0.15s;
+		transition: border-color var(--dur-fast), color var(--dur-fast);
 	}
 
 	.geocode-btn:hover:not(:disabled) {
-		border-color: #d946ef;
-		color: #e879f9;
+		border-color: var(--accent-highlight);
+		color: #F0ABFC;
 	}
 
 	.geocode-btn:disabled {
@@ -192,20 +201,20 @@
 	}
 
 	.geocode-result {
-		color: #4ade80;
+		color: var(--state-success);
 		font-size: 0.8rem;
 	}
 
 	.map {
 		width: 100%;
-		height: calc(100vh - 57px - 49px);
+		height: calc(100vh - 60px - 49px);
 	}
 
 	:global(.leaflet-popup-content-wrapper) {
-		background: #10101a;
-		border: 1px solid #2a2a3e;
-		border-radius: 8px;
-		box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+		background: #111118;
+		border: 1px solid rgba(255, 255, 255, 0.08);
+		border-radius: 12px;
+		box-shadow: 0 4px 24px rgba(0, 0, 0, 0.6);
 		padding: 0;
 	}
 
@@ -214,11 +223,11 @@
 	}
 
 	:global(.leaflet-popup-tip) {
-		background: #10101a;
+		background: #111118;
 	}
 
 	:global(.leaflet-popup-close-button) {
-		color: #64748b !important;
+		color: #9090B0 !important;
 		font-size: 1rem !important;
 		padding: 4px 6px !important;
 	}
