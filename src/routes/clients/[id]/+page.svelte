@@ -2,8 +2,8 @@
 	import { enhance } from '$app/forms';
 	import type { PageData, ActionData } from './$types';
 	import type { Client } from '$lib/api';
-	import { generateInvoice } from '$lib/docs/invoice';
-	import { generateContract } from '$lib/docs/contract';
+	import { generateInvoiceHtml } from '$lib/docs/invoice';
+	import { generateContractHtml } from '$lib/docs/contract';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
@@ -22,83 +22,70 @@
 	let invoiceNumber = $state('INV-001');
 	let issueDate = $state(todayStr());
 	let dueDate = $state(futureDateStr(14));
-	let lineItems = $state([{ description: '', amount: 0 }]);
-	let taxAmount = $state(0);
-	let invoicePaymentTerms = $state('E-transfer to liam@liamnicholson.ca');
-	let generatingInvoice = $state(false);
+	let lineItems = $state([{ description: '', qty: 1, rate: 0 }]);
+	let taxRate = $state(5);
+	let taxLabel = $state('GST (5%)');
+	let invoicePaymentTerms = $state('Payment accepted via e-transfer to liam@liamnicholson.ca — please include invoice number in the memo. Net 15 from invoice date.');
 
-	let subtotal = $derived(lineItems.reduce((sum, item) => sum + (Number(item.amount) || 0), 0));
-	let total = $derived(subtotal + (Number(taxAmount) || 0));
+	let subtotal = $derived(lineItems.reduce((sum, item) => sum + (Number(item.qty) || 0) * (Number(item.rate) || 0), 0));
+	let taxAmount = $derived(subtotal * ((Number(taxRate) || 0) / 100));
+	let total = $derived(subtotal + taxAmount);
 
 	function addLineItem() {
-		lineItems = [...lineItems, { description: '', amount: 0 }];
+		lineItems = [...lineItems, { description: '', qty: 1, rate: 0 }];
 	}
 
 	function removeLineItem(i: number) {
 		lineItems = lineItems.filter((_, idx) => idx !== i);
 	}
 
-	function updateItem(i: number, field: 'description' | 'amount', value: string) {
+	function updateItem(i: number, field: 'description' | 'qty' | 'rate', value: string) {
 		lineItems = lineItems.map((item, idx) =>
-			idx === i ? { ...item, [field]: field === 'amount' ? parseFloat(value) || 0 : value } : item
+			idx === i ? { ...item, [field]: field === 'description' ? value : parseFloat(value) || 0 } : item
 		);
 	}
 
-	async function downloadInvoice() {
-		generatingInvoice = true;
-		try {
-			const bytes = await generateInvoice({
-				invoiceNumber,
-				issueDate,
-				dueDate,
-				clientName: client.business_name,
-				clientAddress: client.address ?? '',
-				lineItems: lineItems.map((li) => ({ description: li.description, amount: Number(li.amount) || 0 })),
-				subtotal,
-				tax: Number(taxAmount) || 0,
-				total,
-				paymentTerms: invoicePaymentTerms
-			});
-			triggerDownload(bytes, `INV-${invoiceNumber}-${client.business_name.replace(/\s+/g, '-')}.pdf`);
-		} finally {
-			generatingInvoice = false;
-		}
+	function openInvoice() {
+		const html = generateInvoiceHtml({
+			invoiceNumber,
+			issueDate,
+			dueDate,
+			clientName: client.business_name,
+			clientAddress: client.address ?? '',
+			clientEmail: client.email ?? undefined,
+			lineItems: lineItems.map((li) => ({ description: li.description, qty: Number(li.qty) || 0, rate: Number(li.rate) || 0 })),
+			taxRate: Number(taxRate) || 0,
+			taxLabel,
+			notes: invoicePaymentTerms
+		});
+		openHtml(html);
 	}
 
 	// ── Contract state ─────────────────────────────────────────────────────────
 	let serviceDesc = $state('');
 	let contractProjectValue = $state(client.project_value ?? 0);
 	let contractStartDate = $state(client.contract_start ?? todayStr());
-	let contractPaymentTerms = $state('50% deposit, 50% on completion');
 	let generatingContract = $state(false);
 
-	async function downloadContract() {
-		generatingContract = true;
-		try {
-			const bytes = await generateContract({
-				clientName: client.business_name,
-				clientAddress: client.address ?? '',
-				serviceDesc,
-				projectValue: Number(contractProjectValue) || 0,
-				mrr: Number(client.mrr) || 0,
-				startDate: contractStartDate,
-				paymentTerms: contractPaymentTerms
-			});
-			triggerDownload(bytes, `Contract-${client.business_name.replace(/\s+/g, '-')}.pdf`);
-		} finally {
-			generatingContract = false;
-		}
+	function openContract() {
+		const html = generateContractHtml({
+			clientName: client.business_name,
+			clientAddress: client.address ?? '',
+			serviceDesc,
+			projectValue: Number(contractProjectValue) || 0,
+			mrr: Number(client.mrr) || 0,
+			startDate: contractStartDate
+		});
+		openHtml(html);
 	}
 
 	// ── Utility ────────────────────────────────────────────────────────────────
-	function triggerDownload(bytes: Uint8Array, filename: string) {
-		const blob = new Blob([bytes.buffer as ArrayBuffer], { type: 'application/pdf' });
-		const url = URL.createObjectURL(blob);
-		const a = document.createElement('a');
-		a.href = url;
-		a.download = filename;
-		a.click();
-		URL.revokeObjectURL(url);
+	function openHtml(html: string) {
+		const w = window.open('', '_blank');
+		if (!w) return;
+		w.document.open();
+		w.document.write(html);
+		w.document.close();
 	}
 
 	function fmtMrr(val: number) {
@@ -226,8 +213,12 @@
 					<input type="date" bind:value={dueDate} />
 				</div>
 				<div class="field">
-					<label>Tax Amount ($)</label>
-					<input type="number" min="0" step="0.01" bind:value={taxAmount} placeholder="0" />
+					<label>Tax Rate (%)</label>
+					<input type="number" min="0" step="0.01" bind:value={taxRate} placeholder="5" />
+				</div>
+				<div class="field">
+					<label>Tax Label</label>
+					<input type="text" bind:value={taxLabel} placeholder="GST (5%)" />
 				</div>
 				<div class="field full">
 					<label>Payment Terms</label>
@@ -238,7 +229,8 @@
 			<div class="line-items">
 				<div class="line-items-header">
 					<span class="col-desc">Description</span>
-					<span class="col-amt">Amount ($)</span>
+					<span class="col-qty">Qty</span>
+					<span class="col-rate">Rate ($)</span>
 					<span class="col-rm"></span>
 				</div>
 				{#each lineItems as item, i}
@@ -251,13 +243,22 @@
 							oninput={(e) => updateItem(i, 'description', (e.target as HTMLInputElement).value)}
 						/>
 						<input
-							class="col-amt"
+							class="col-qty"
+							type="number"
+							min="0"
+							step="1"
+							value={item.qty}
+							placeholder="1"
+							oninput={(e) => updateItem(i, 'qty', (e.target as HTMLInputElement).value)}
+						/>
+						<input
+							class="col-rate"
 							type="number"
 							min="0"
 							step="0.01"
-							value={item.amount}
+							value={item.rate}
 							placeholder="0.00"
-							oninput={(e) => updateItem(i, 'amount', (e.target as HTMLInputElement).value)}
+							oninput={(e) => updateItem(i, 'rate', (e.target as HTMLInputElement).value)}
 						/>
 						<button
 							class="btn-remove"
@@ -272,14 +273,14 @@
 
 			<div class="totals">
 				<span>Subtotal</span><span>${subtotal.toFixed(2)}</span>
-				{#if Number(taxAmount) > 0}
-					<span>Tax</span><span>${Number(taxAmount).toFixed(2)}</span>
+				{#if taxAmount > 0}
+					<span>{taxLabel}</span><span>${taxAmount.toFixed(2)}</span>
 				{/if}
 				<span class="total-label">Total</span><span class="total-value">${total.toFixed(2)}</span>
 			</div>
 
-			<button class="save-btn" onclick={downloadInvoice} disabled={generatingInvoice}>
-				{generatingInvoice ? 'Generating…' : 'Download Invoice PDF'}
+			<button class="save-btn" onclick={openInvoice}>
+				Open Invoice
 			</button>
 		</div>
 
@@ -312,14 +313,10 @@
 					<label>Start Date</label>
 					<input type="date" bind:value={contractStartDate} />
 				</div>
-				<div class="field full">
-					<label>Payment Terms</label>
-					<input type="text" bind:value={contractPaymentTerms} />
-				</div>
 			</div>
 
-			<button class="save-btn" onclick={downloadContract} disabled={generatingContract}>
-				{generatingContract ? 'Generating…' : 'Download Contract PDF'}
+			<button class="save-btn" onclick={openContract}>
+				Open Contract
 			</button>
 		</div>
 	</div>
@@ -591,7 +588,8 @@
 	}
 
 	.col-desc { flex: 1; }
-	.col-amt  { width: 130px; }
+	.col-qty  { width: 70px; }
+	.col-rate { width: 110px; }
 	.col-rm   { width: 28px; }
 
 	.btn-remove {
