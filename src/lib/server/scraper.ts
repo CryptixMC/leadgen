@@ -153,10 +153,15 @@ export async function runScrape(
 		}
 	};
 
+	const allBusinesses = !category || category === '*';
+
 	// Build the text search query — neighborhood-scoped if provided
-	const searchQuery = neighborhood
-		? `${category} in ${neighborhood}, ${city}`
-		: `${category} in ${city}`;
+	const locationLabel = neighborhood ? `${neighborhood}, ${city}` : city;
+	const searchQuery = allBusinesses
+		? `establishments in ${locationLabel}`
+		: neighborhood
+			? `${category} in ${neighborhood}, ${city}`
+			: `${category} in ${city}`;
 
 	// If a neighborhood is given, geocode it first for a tight nearby-search radius
 	if (neighborhood) {
@@ -210,7 +215,7 @@ export async function runScrape(
 				? await getWithBackoff(PLACES_NEARBY_URL, {
 						location: `${seedLat},${seedLng}`,
 						radius,
-						keyword: category,
+						...(allBusinesses ? {} : { keyword: category }),
 						key: apiKey
 					})
 				: await fetchNearbyPage(apiKey, category, seedLat, seedLng!, nextPageToken);
@@ -232,5 +237,5 @@ export async function runScrape(
 		}
 	}
 
-	return { upserted, category, city, pages_fetched: pagesFetched };
+	return { upserted, category: allBusinesses ? 'all businesses' : category, city, pages_fetched: pagesFetched };
 }

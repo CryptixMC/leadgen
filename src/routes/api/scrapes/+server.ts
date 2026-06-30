@@ -7,8 +7,8 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 	if (locals.demo) return json({ inserted: 0, skipped: 0, message: 'Demo mode — scraping disabled' });
 
 	requireAuth(locals);
-	const { category, city, target = 60, neighborhood } = await request.json();
-	if (!category || !city) throw error(400, 'category and city are required');
+	const { category = '', city, target = 60, neighborhood } = await request.json();
+	if (!city) throw error(400, 'city is required');
 
 	try {
 		const result = await runScrape(String(category), String(city), Number(target), neighborhood ? String(neighborhood) : undefined);

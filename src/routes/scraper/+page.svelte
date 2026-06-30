@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { triggerScrape, fetchLeads, enrichLead } from '$lib/api';
 
+	let allBusinesses = $state(false);
 	let category = $state('');
 	let city = $state('Winnipeg MB');
 	let neighborhood = $state('');
@@ -48,7 +49,7 @@
 		result = null;
 
 		try {
-			result = await triggerScrape(category.trim(), city.trim(), target, neighborhood.trim() || undefined);
+			result = await triggerScrape(allBusinesses ? '' : category.trim(), city.trim(), target, neighborhood.trim() || undefined);
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Scrape failed';
 		} finally {
@@ -67,15 +68,25 @@
 
 	<form onsubmit={handleSubmit} class="card">
 		<div class="field">
-			<label for="category">Category</label>
-			<input
-				id="category"
-				type="text"
-				bind:value={category}
-				placeholder="e.g. restaurant, plumber, dentist"
-				required
-				disabled={loading}
-			/>
+			<div class="category-header">
+				<label for="category">Category</label>
+				<label class="all-toggle">
+					<input type="checkbox" bind:checked={allBusinesses} disabled={loading} />
+					All business types
+				</label>
+			</div>
+			{#if !allBusinesses}
+				<input
+					id="category"
+					type="text"
+					bind:value={category}
+					placeholder="e.g. restaurant, plumber, dentist"
+					required
+					disabled={loading}
+				/>
+			{:else}
+				<div class="all-badge">Every type of business — no filter applied</div>
+			{/if}
 		</div>
 
 		<div class="field">
@@ -115,7 +126,7 @@
 			/>
 		</div>
 
-		<button type="submit" class="submit-btn" disabled={loading || !category.trim()}>
+		<button type="submit" class="submit-btn" disabled={loading || (!allBusinesses && !category.trim())}>
 			{loading ? 'Scraping…' : 'Run Scrape'}
 		</button>
 	</form>
@@ -249,6 +260,40 @@
 	input::placeholder {
 		color: var(--text-muted);
 		opacity: 0.5;
+	}
+
+	.category-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+	}
+
+	.all-toggle {
+		display: flex;
+		align-items: center;
+		gap: 0.35rem;
+		font-family: var(--font-ui);
+		font-size: 0.72rem;
+		font-weight: 500;
+		color: var(--text-muted);
+		text-transform: none;
+		letter-spacing: 0;
+		cursor: pointer;
+	}
+
+	.all-toggle input[type='checkbox'] {
+		width: auto;
+		accent-color: var(--accent-primary);
+		cursor: pointer;
+	}
+
+	.all-badge {
+		background: rgba(124, 58, 237, 0.1);
+		border: 1px dashed rgba(124, 58, 237, 0.35);
+		color: #a78bfa;
+		padding: 0.55rem 0.85rem;
+		border-radius: var(--radius-sm);
+		font-size: 0.8rem;
 	}
 
 	.optional {
