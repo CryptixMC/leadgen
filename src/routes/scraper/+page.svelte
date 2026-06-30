@@ -19,7 +19,7 @@
 		rescoreError = '';
 		rescoreResult = null;
 		try {
-			rescoreResult = await rescoreLeads();
+			rescoreResult = await rescoreLeads({ force: true });
 		} catch (err) {
 			rescoreError = err instanceof Error ? err.message : 'Rescore failed';
 		} finally {
