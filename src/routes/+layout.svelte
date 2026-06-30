@@ -374,6 +374,10 @@
 			display: none;
 		}
 
+		.auth-btn {
+			display: none;
+		}
+
 		.hamburger {
 			display: flex;
 		}
