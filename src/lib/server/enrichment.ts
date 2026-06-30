@@ -437,5 +437,19 @@ export async function runEnrichment(lead: Record<string, unknown>): Promise<Reco
 		Object.assign(enrichment, yelp);
 	}
 
+	// Compute social activity score: count of non-null social channels
+	const socialFields = ['facebook_url', 'instagram_url', 'twitter_url', 'linkedin_url', 'tiktok_url', 'youtube_url'] as const;
+	const mergedSocial = { ...lead, ...enrichment };
+	const socialActivityScore = socialFields.filter((f) => Boolean(mergedSocial[f])).length;
+	enrichment.social_activity_score = socialActivityScore;
+
+	// Generate LinkedIn search URL from owner_name + city (if owner_name was pulled from Places)
+	const ownerName = (enrichment.owner_name ?? lead.owner_name) as string | null;
+	if (ownerName && !enrichment.linkedin_search_url && !lead.linkedin_search_url) {
+		const addr = (lead.address as string) ?? '';
+		const city = addr.includes(',') ? addr.split(',')[1].trim() : addr;
+		enrichment.linkedin_search_url = `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(ownerName + ' ' + city)}`;
+	}
+
 	return enrichment;
 }

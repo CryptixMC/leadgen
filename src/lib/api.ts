@@ -38,6 +38,13 @@ export interface Lead {
 	hidden: boolean;
 	created_at: string | null;
 	last_updated: string | null;
+	opening_hours: string[] | null;
+	price_level: number | null;
+	last_review_date: string | null;
+	owner_response_rate: number | null;
+	owner_name: string | null;
+	linkedin_search_url: string | null;
+	social_activity_score: number | null;
 }
 
 export interface Client {
