@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { triggerScrape, fetchLeads, enrichLead } from '$lib/api';
+	import { triggerScrape, rescoreLeads } from '$lib/api';
 
 	let allBusinesses = $state(false);
 	let category = $state('');
@@ -13,26 +13,13 @@
 	let rescoreLoading = $state(false);
 	let rescoreResult = $state<{ updated: number; total: number } | null>(null);
 	let rescoreError = $state('');
-	let rescoreProgress = $state({ done: 0, failed: 0, total: 0, currentName: '' });
 
 	async function handleRescore() {
 		rescoreLoading = true;
 		rescoreError = '';
 		rescoreResult = null;
-		rescoreProgress = { done: 0, failed: 0, total: 0, currentName: '' };
 		try {
-			const leads = await fetchLeads({}, fetch);
-			rescoreProgress = { ...rescoreProgress, total: leads.length };
-			for (const lead of leads) {
-				rescoreProgress = { ...rescoreProgress, currentName: lead.business_name };
-				try {
-					await enrichLead(lead.id);
-					rescoreProgress = { ...rescoreProgress, done: rescoreProgress.done + 1 };
-				} catch {
-					rescoreProgress = { ...rescoreProgress, failed: rescoreProgress.failed + 1 };
-				}
-			}
-			rescoreResult = { updated: rescoreProgress.done, total: rescoreProgress.total };
+			rescoreResult = await rescoreLeads();
 		} catch (err) {
 			rescoreError = err instanceof Error ? err.message : 'Rescore failed';
 		} finally {
@@ -166,23 +153,8 @@
 		</button>
 	</div>
 
-	{#if rescoreLoading && rescoreProgress.total > 0}
-		{@const pct = Math.round(((rescoreProgress.done + rescoreProgress.failed) / rescoreProgress.total) * 100)}
-		<div class="status-card info progress-card">
-			<div class="progress-header">
-				<span class="progress-label">Enriching & rescoring…</span>
-				<span class="progress-pct">{pct}%</span>
-			</div>
-			<div class="progress-track">
-				<div class="progress-fill" style="width: {pct}%"></div>
-			</div>
-			<div class="progress-meta">
-				<span class="progress-name">{rescoreProgress.currentName}</span>
-				<span class="progress-counts">{rescoreProgress.done} done · {rescoreProgress.failed} failed · {rescoreProgress.total - rescoreProgress.done - rescoreProgress.failed} left</span>
-			</div>
-		</div>
-	{:else if rescoreLoading}
-		<div class="status-card info"><span class="spinner"></span> Loading leads…</div>
+	{#if rescoreLoading}
+		<div class="status-card info"><span class="spinner"></span> Enriching & rescoring all leads in parallel…</div>
 	{/if}
 
 	{#if rescoreResult}
@@ -423,62 +395,6 @@
 		font-size: 1.25rem;
 		color: var(--text-primary);
 		margin-bottom: 0.4rem;
-	}
-
-	.progress-card {
-		flex-direction: column;
-		gap: 0.5rem;
-	}
-
-	.progress-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-	}
-
-	.progress-label {
-		color: var(--text-muted);
-		font-size: 0.875rem;
-	}
-
-	.progress-pct {
-		color: var(--accent-primary);
-		font-weight: 600;
-		font-size: 0.875rem;
-	}
-
-	.progress-track {
-		width: 100%;
-		height: 6px;
-		background: var(--border-subtle);
-		border-radius: 3px;
-		overflow: hidden;
-	}
-
-	.progress-fill {
-		height: 100%;
-		background: var(--gradient-primary);
-		border-radius: 3px;
-		transition: width 0.3s ease;
-	}
-
-	.progress-meta {
-		display: flex;
-		justify-content: space-between;
-		font-size: 0.75rem;
-	}
-
-	.progress-name {
-		color: var(--text-primary);
-		font-style: italic;
-		max-width: 60%;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	.progress-counts {
-		color: var(--text-muted);
 	}
 
 	@media (max-width: 768px) {

@@ -50,7 +50,7 @@ export async function fetchPagespeed(url: string): Promise<Record<string, unknow
 	};
 
 	try {
-		const resp = await fetch(`${PAGESPEED_URL}?${params}`, { signal: withTimeout(45_000) });
+		const resp = await fetch(`${PAGESPEED_URL}?${params}`, { signal: withTimeout(15_000) });
 
 		if (!resp.ok) return nullResult;
 
@@ -111,7 +111,7 @@ export async function fetchYelp(
 		const params = new URLSearchParams({ term: businessName, location: address, limit: '3' });
 		const resp = await fetch(`${YELP_SEARCH_URL}?${params}`, {
 			headers: { Authorization: `Bearer ${YELP_API_KEY}` },
-			signal: withTimeout(15_000)
+			signal: withTimeout(8_000)
 		});
 		if (!resp.ok) return { also_on_yelp: null, yelp_url: null };
 
@@ -159,7 +159,7 @@ export async function discoverWebsite(
 				'User-Agent': BOT_UA
 			},
 			body: new URLSearchParams({ q: query, b: '' }),
-			signal: withTimeout(15_000)
+			signal: withTimeout(8_000)
 		});
 		if (!resp.ok) return { websiteUrl: null, discoveredSocial };
 
@@ -203,7 +203,7 @@ export async function scrapeWebsite(url: string, { subpages = true } = {}): Prom
 	try {
 		const resp = await fetch(url, {
 			headers: { 'User-Agent': BOT_UA },
-			signal: withTimeout(10_000)
+			signal: withTimeout(7_000)
 		});
 		if (!resp.ok) return result;
 

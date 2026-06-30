@@ -24,7 +24,7 @@ export const POST: RequestHandler = async ({ locals, url }) => {
 	if (err) throw error(500, err.message);
 
 	const now = new Date().toISOString();
-	const sem = new Semaphore(10);
+	const sem = new Semaphore(20);
 	let updated = 0;
 
 	await Promise.all(
