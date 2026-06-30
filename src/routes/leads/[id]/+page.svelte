@@ -49,6 +49,51 @@
 		setTimeout(() => (saveMsg = ''), 2500);
 	}
 
+	// --- Edit lead state ---
+	let editModalOpen = $state(false);
+	let editForm = $state({
+		business_name: '',
+		address: '',
+		phone: '',
+		email: '',
+		website_url: ''
+	});
+	let editSaving = $state(false);
+	let editError = $state('');
+
+	function openEditModal() {
+		editForm = {
+			business_name: lead.business_name ?? '',
+			address: lead.address ?? '',
+			phone: lead.phone ?? '',
+			email: lead.email ?? '',
+			website_url: lead.website_url ?? ''
+		};
+		editError = '';
+		editModalOpen = true;
+	}
+
+	async function handleSaveEdit(e: Event) {
+		e.preventDefault();
+		editError = '';
+		editSaving = true;
+		try {
+			lead = await updateLead(lead.id, {
+				business_name: editForm.business_name.trim(),
+				address: editForm.address.trim(),
+				phone: editForm.phone.trim(),
+				email: editForm.email.trim(),
+				website_url: editForm.website_url.trim()
+			});
+			notes = lead.notes ?? '';
+			editModalOpen = false;
+		} catch (err) {
+			editError = err instanceof Error ? err.message : 'Failed to save changes';
+		} finally {
+			editSaving = false;
+		}
+	}
+
 	function fmt(val: unknown) {
 		if (val === null || val === undefined) return '—';
 		if (typeof val === 'boolean') return val ? 'Yes' : 'No';
@@ -231,6 +276,7 @@
 			{#if lead.email}
 				<button class="email-btn" onclick={openEmailModal}>Send Email</button>
 			{/if}
+			<button class="email-btn" onclick={openEditModal}>Edit Lead</button>
 			<button
 				class="delete-btn"
 				class:confirm={confirmDelete}
@@ -531,6 +577,76 @@
 		{/if}
 	</section>
 </main>
+
+{#if editModalOpen}
+	<div
+		class="modal-backdrop"
+		onclick={() => (editModalOpen = false)}
+		role="presentation"
+		onkeydown={(e) => e.key === 'Escape' && (editModalOpen = false)}
+	>
+		<div
+			class="modal"
+			onclick={(e) => e.stopPropagation()}
+			onkeydown={(e) => e.stopPropagation()}
+			role="dialog"
+			aria-modal="true"
+			aria-label="Edit Lead"
+			tabindex="-1"
+		>
+			<div class="modal-header">
+				<h2>Edit {lead.business_name}</h2>
+				<button class="modal-close" onclick={() => (editModalOpen = false)} aria-label="Close">✕</button>
+			</div>
+
+			<form onsubmit={handleSaveEdit}>
+				<div class="modal-body">
+					<div class="form-row">
+						<label for="edit-business-name">Business Name</label>
+						<input
+							id="edit-business-name"
+							type="text"
+							bind:value={editForm.business_name}
+							required
+						/>
+					</div>
+
+					<div class="form-row">
+						<label for="edit-address">Address</label>
+						<input id="edit-address" type="text" bind:value={editForm.address} placeholder="123 Main St, Winnipeg, MB" />
+					</div>
+
+					<div class="form-row">
+						<label for="edit-phone">Phone</label>
+						<input id="edit-phone" type="text" bind:value={editForm.phone} placeholder="(204) 555-0100" />
+					</div>
+
+					<div class="form-row">
+						<label for="edit-email">Email</label>
+						<input id="edit-email" type="email" bind:value={editForm.email} placeholder="owner@example.com" />
+					</div>
+
+					<div class="form-row">
+						<label for="edit-website">Website URL</label>
+						<input id="edit-website" type="text" bind:value={editForm.website_url} placeholder="https://example.com" />
+					</div>
+				</div>
+
+				<div class="modal-footer">
+					{#if editError}
+						<span class="error-msg">{editError}</span>
+					{/if}
+					<button type="button" class="cancel-btn" onclick={() => (editModalOpen = false)} disabled={editSaving}>
+						Cancel
+					</button>
+					<button type="submit" class="save-btn" disabled={editSaving || !editForm.business_name.trim()}>
+						{editSaving ? 'Saving…' : 'Save Changes'}
+					</button>
+				</div>
+			</form>
+		</div>
+	</div>
+{/if}
 
 {#if emailModalOpen}
 	<div
@@ -1071,6 +1187,7 @@
 	}
 
 	.form-row input[type='text'],
+	.form-row input[type='email'],
 	.form-row select,
 	.form-row textarea {
 		background: var(--bg-base);
@@ -1086,6 +1203,7 @@
 	}
 
 	.form-row input[type='text']:focus,
+	.form-row input[type='email']:focus,
 	.form-row select:focus,
 	.form-row textarea:focus {
 		border-color: var(--accent-primary);

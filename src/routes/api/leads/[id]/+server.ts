@@ -2,6 +2,8 @@ import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
 import { requireAuth } from '$lib/server/auth';
+import { calculateScore } from '$lib/server/scoring';
+import { normalizeWebsiteUrl } from '$lib/server/utils';
 import { DEMO_LEADS } from '$lib/demo/data';
 
 export const GET: RequestHandler = async ({ locals, params }) => {
@@ -34,8 +36,36 @@ export const PATCH: RequestHandler = async ({ locals, params, request }) => {
 	if (payload.status !== undefined) updateData.status = payload.status;
 	if (payload.notes !== undefined) updateData.notes = payload.notes;
 	if (payload.hidden !== undefined) updateData.hidden = Boolean(payload.hidden);
+	if (payload.business_name !== undefined) {
+		const businessName = String(payload.business_name).trim();
+		if (!businessName) throw error(400, 'Business name is required');
+		updateData.business_name = businessName;
+	}
+	if (payload.address !== undefined) updateData.address = payload.address || null;
+	if (payload.phone !== undefined) updateData.phone = payload.phone || null;
+	if (payload.email !== undefined) updateData.email = payload.email || null;
+	if (payload.website_url !== undefined) {
+		let websiteUrl: string | null;
+		try {
+			websiteUrl = normalizeWebsiteUrl(payload.website_url);
+		} catch (e) {
+			throw error(400, e instanceof Error ? e.message : 'Invalid website URL');
+		}
+		updateData.website_url = websiteUrl;
+		updateData.has_website = Boolean(websiteUrl);
+		updateData.has_https = websiteUrl != null && websiteUrl.startsWith('https://');
+	}
 	if (!Object.keys(updateData).length) throw error(400, 'No updatable fields provided');
 	updateData.last_updated = new Date().toISOString();
+
+	if (updateData.website_url !== undefined || updateData.email !== undefined) {
+		const { data: existing } = await db.from('leads').select('*').eq('id', params.id).single();
+		if (existing) {
+			const [score, priority] = calculateScore({ ...existing, ...updateData });
+			updateData.lead_score = score;
+			updateData.priority = priority;
+		}
+	}
 
 	const { data, error: err } = await db
 		.from('leads')
