@@ -1,5 +1,5 @@
 import { load as cheerioLoad } from 'cheerio';
-import { SOCIAL_MEDIA_DOMAINS, AGGREGATOR_DOMAINS, isSocialMediaUrl, isAggregatorUrl } from './utils.js';
+import { SOCIAL_MEDIA_DOMAINS, AGGREGATOR_DOMAINS, isSocialMediaUrl, isAggregatorUrl, getSocialPlatform } from './utils.js';
 import { GOOGLE_PAGESPEED_API_KEY, YELP_API_KEY } from '$env/static/private';
 
 const PAGESPEED_URL = 'https://www.googleapis.com/pagespeedonline/v5/runPagespeed';
@@ -157,9 +157,10 @@ export async function fetchYelp(
 export async function discoverWebsite(
 	businessName: string,
 	address: string
-): Promise<string | null> {
+): Promise<{ websiteUrl: string | null; discoveredSocial: Record<string, string> }> {
 	const city = address.includes(',') ? address.split(',')[1].trim() : address;
 	const query = `"${businessName}" "${city}"`;
+	const discoveredSocial: Record<string, string> = {};
 
 	try {
 		const resp = await fetch(DDG_SEARCH_URL, {
@@ -171,7 +172,7 @@ export async function discoverWebsite(
 			body: new URLSearchParams({ q: query, b: '' }),
 			signal: withTimeout(15_000)
 		});
-		if (!resp.ok) return null;
+		if (!resp.ok) return { websiteUrl: null, discoveredSocial };
 
 		const html = await resp.text();
 		const $ = cheerioLoad(html);
@@ -189,17 +190,27 @@ export async function discoverWebsite(
 			}
 
 			if ([...DIRECTORY_DOMAINS].some((d) => domain === d || domain.endsWith('.' + d))) continue;
-			if (isSocialMediaUrl(href)) continue;
-			return href;
+
+			if (isSocialMediaUrl(href)) {
+				const platform = getSocialPlatform(href);
+				if (platform && !discoveredSocial[platform]) discoveredSocial[platform] = href;
+				continue;
+			}
+
+			return { websiteUrl: href, discoveredSocial };
 		}
 	} catch {
 		// ignore
 	}
-	return null;
+	return { websiteUrl: null, discoveredSocial };
 }
 
 export async function scrapeWebsite(url: string): Promise<Record<string, unknown>> {
-	const result: Record<string, unknown> = { email: null, site_age_estimate: null };
+	const result: Record<string, unknown> = {
+		email: null,
+		site_age_estimate: null,
+		social_links: {} as Record<string, string>
+	};
 	try {
 		const resp = await fetch(url, {
 			headers: { 'User-Agent': BOT_UA },
@@ -236,6 +247,67 @@ export async function scrapeWebsite(url: string): Promise<Record<string, unknown
 				}
 			}
 		}
+
+		// Email fallback: check /contact and /about sub-pages
+		if (!foundEmail) {
+			const baseUrl = new URL(url).origin;
+			const subPageHrefs: string[] = [];
+			$('a[href]').each((_, el) => {
+				const href = $(el).attr('href') ?? '';
+				const lower = href.toLowerCase();
+				if (lower.includes('contact') || lower.includes('about')) {
+					let full: string;
+					try {
+						full = new URL(href, baseUrl).toString();
+					} catch {
+						return;
+					}
+					if (full.startsWith(baseUrl) && !subPageHrefs.includes(full)) {
+						subPageHrefs.push(full);
+					}
+				}
+			});
+
+			for (const subUrl of subPageHrefs.slice(0, 2)) {
+				if (foundEmail) break;
+				try {
+					const subResp = await fetch(subUrl, {
+						headers: { 'User-Agent': BOT_UA },
+						signal: withTimeout(8_000)
+					});
+					if (!subResp.ok) continue;
+					const subHtml = await subResp.text();
+					const $sub = cheerioLoad(subHtml);
+
+					$sub('a[href]').each((_, el) => {
+						if (foundEmail) return;
+						const href = $sub(el).attr('href') ?? '';
+						if (href.startsWith('mailto:')) {
+							const candidate = href.slice(7).split('?')[0].trim();
+							if (EMAIL_RE.test(candidate)) {
+								foundEmail = candidate;
+								EMAIL_RE.lastIndex = 0;
+							}
+						}
+					});
+
+					if (!foundEmail) {
+						const subText = $sub.text();
+						EMAIL_RE.lastIndex = 0;
+						let subMatch: RegExpExecArray | null;
+						while ((subMatch = EMAIL_RE.exec(subText)) !== null) {
+							const candidate = subMatch[0];
+							if (!EMAIL_EXCLUDE_EXTS.has(candidate.toLowerCase().replace(/.*(\.[^.]+)$/, '$1'))) {
+								foundEmail = candidate;
+								break;
+							}
+						}
+					}
+				} catch {
+					// skip sub-page on error
+				}
+			}
+		}
 		result.email = foundEmail;
 
 		// Site age: copyright year in HTML
@@ -262,6 +334,17 @@ export async function scrapeWebsite(url: string): Promise<Record<string, unknown
 			const age = CURRENT_YEAR - foundYear;
 			result.site_age_estimate = `~${foundYear} (est. ${age} yr${age !== 1 ? 's' : ''} old)`;
 		}
+
+		// Social links: extract from all <a href> tags (footer/nav icons etc.)
+		const socialLinks: Record<string, string> = {};
+		$('a[href]').each((_, el) => {
+			const href = $(el).attr('href') ?? '';
+			const platform = getSocialPlatform(href);
+			if (platform && !socialLinks[platform]) {
+				socialLinks[platform] = href;
+			}
+		});
+		result.social_links = socialLinks;
 	} catch {
 		// ignore
 	}
@@ -288,6 +371,8 @@ export async function runEnrichment(lead: Record<string, unknown>): Promise<Reco
 	let websiteInferred = Boolean(lead.website_inferred);
 
 	if (isSocialMediaUrl(websiteUrl)) {
+		const platform = getSocialPlatform(websiteUrl);
+		if (platform) enrichment[`${platform}_url`] = websiteUrl;
 		websiteUrl = null;
 		enrichment.website_url = null;
 		enrichment.has_website = false;
@@ -297,6 +382,10 @@ export async function runEnrichment(lead: Record<string, unknown>): Promise<Reco
 	if (websiteUrl) {
 		const finalUrl = await resolveFinalUrl(websiteUrl);
 		if (isAggregatorUrl(finalUrl) || isSocialMediaUrl(finalUrl)) {
+			if (isSocialMediaUrl(finalUrl)) {
+				const platform = getSocialPlatform(finalUrl);
+				if (platform) enrichment[`${platform}_url`] = finalUrl;
+			}
 			websiteUrl = null;
 			enrichment.website_url = null;
 			enrichment.has_website = false;
@@ -306,7 +395,7 @@ export async function runEnrichment(lead: Record<string, unknown>): Promise<Reco
 	}
 
 	if (!websiteUrl) {
-		const discovered = await discoverWebsite(
+		const { websiteUrl: discovered, discoveredSocial } = await discoverWebsite(
 			(lead.business_name as string) ?? '',
 			(lead.address as string) ?? ''
 		);
@@ -314,6 +403,9 @@ export async function runEnrichment(lead: Record<string, unknown>): Promise<Reco
 			websiteUrl = discovered;
 			websiteInferred = true;
 			enrichment.website_url = websiteUrl;
+		}
+		for (const [platform, url] of Object.entries(discoveredSocial)) {
+			if (!enrichment[`${platform}_url`]) enrichment[`${platform}_url`] = url;
 		}
 		enrichment.website_inferred = websiteInferred;
 	}
@@ -332,6 +424,12 @@ export async function runEnrichment(lead: Record<string, unknown>): Promise<Reco
 		Object.assign(enrichment, pagespeed);
 		if (websiteData.email) enrichment.email = websiteData.email;
 		if (websiteData.site_age_estimate) enrichment.site_age_estimate = websiteData.site_age_estimate;
+
+		const scrapedSocial = (websiteData.social_links ?? {}) as Record<string, string>;
+		for (const [platform, url] of Object.entries(scrapedSocial)) {
+			if (!enrichment[`${platform}_url`]) enrichment[`${platform}_url`] = url;
+		}
+
 		Object.assign(enrichment, yelp);
 	} else {
 		Object.assign(enrichment, {
