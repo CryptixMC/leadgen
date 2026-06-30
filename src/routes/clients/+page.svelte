@@ -126,7 +126,6 @@
 	table {
 		width: 100%;
 		border-collapse: collapse;
-		font-size: 0.875rem;
 	}
 
 	thead th {
@@ -143,7 +142,7 @@
 		border-bottom: 1px solid var(--border-grid);
 	}
 
-	thead th.num {
+	th.num {
 		text-align: right;
 	}
 
@@ -159,19 +158,26 @@
 
 	td {
 		padding: 0.75rem 1rem;
-		vertical-align: middle;
+		font-size: 0.9rem;
+		border-top: 1px solid #1a1a2e;
+		color: #94a3b8;
+	}
+
+	tr:hover td {
+		background: #10101a;
+		cursor: pointer;
 	}
 
 	.name {
-		font-weight: 500;
 		color: var(--text-primary);
+		font-weight: 500;
 		white-space: nowrap;
 	}
 
 	.services {
 		display: flex;
+		gap: 0.4rem;
 		flex-wrap: wrap;
-		gap: 0.3rem;
 	}
 
 	.badge {
@@ -236,8 +242,8 @@
 	}
 
 	.empty {
-		text-align: center;
 		color: var(--text-muted);
+		text-align: center;
 		opacity: 0.5;
 		padding: 4rem 2rem;
 		border-radius: var(--radius-lg);
