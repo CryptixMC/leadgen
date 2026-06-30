@@ -406,4 +406,22 @@
 	.progress-counts {
 		color: var(--text-muted);
 	}
+
+	@media (max-width: 768px) {
+		main {
+			padding: 1rem;
+		}
+
+		.card {
+			padding: 1.25rem;
+		}
+
+		.submit-btn {
+			min-height: 44px;
+		}
+
+		input {
+			min-height: 44px;
+		}
+	}
 </style>

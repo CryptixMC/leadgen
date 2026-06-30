@@ -353,6 +353,65 @@
 			</tbody>
 		</table>
 	</div>
+
+	<!-- Mobile card list (shown only on small screens) -->
+	<div class="card-list">
+		{#each filtered as lead (lead.id)}
+			<div
+				class="lead-card"
+				class:card-selected={selected.has(lead.id)}
+				onclick={() => (window.location.href = `/leads/${lead.id}`)}
+				role="button"
+				tabindex="0"
+				onkeydown={(e) => e.key === 'Enter' && (window.location.href = `/leads/${lead.id}`)}
+			>
+				<div class="card-check">
+					<input type="checkbox" checked={selected.has(lead.id)} onclick={(e) => { e.stopPropagation(); toggleSelect(lead.id, e); }} />
+				</div>
+				<div class="card-body">
+					<div class="card-top">
+						<span class="card-name">{lead.business_name}</span>
+						<span class="card-score" style="color: {lead.lead_score !== null && lead.lead_score >= 60 ? 'var(--accent-highlight)' : lead.lead_score !== null && lead.lead_score >= 30 ? '#818cf8' : 'var(--text-muted)'}">{lead.lead_score ?? '—'}</span>
+					</div>
+					<div class="card-badges">
+						<span class={priorityClass(lead.priority)}>{lead.priority ?? '—'}</span>
+						<span class={statusClass(lead.status)}>{lead.status}</span>
+						<a
+							href={`https://www.google.com/maps/place/?q=place_id:${lead.google_place_id}`}
+							target="_blank"
+							rel="noopener noreferrer"
+							onclick={(e) => e.stopPropagation()}
+							class="maps-link"
+						>Maps</a>
+					</div>
+					{#if lead.address}
+						<div class="card-addr">{lead.address}</div>
+					{/if}
+					{#if lead.website_url}
+						<div class="card-meta">
+							<a
+								href={lead.website_url}
+								target="_blank"
+								rel="noopener noreferrer"
+								onclick={(e) => e.stopPropagation()}
+								class="site-link"
+							>{new URL(lead.website_url).hostname}</a>
+							{#if lead.website_inferred}
+								<span class="inferred-badge" title="Found via web search">!</span>
+							{/if}
+						</div>
+					{:else if lead.email}
+						<div class="card-meta">
+							<a href={`mailto:${lead.email}`} onclick={(e) => e.stopPropagation()} class="email-link">{lead.email}</a>
+						</div>
+					{/if}
+				</div>
+			</div>
+		{/each}
+		{#if filtered.length === 0}
+			<div class="empty card-empty">No leads match your filters.</div>
+		{/if}
+	</div>
 </main>
 
 {#if showCreateModal}
@@ -1102,5 +1161,172 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		max-width: 400px;
+	}
+
+	/* Mobile card list */
+	.card-list {
+		display: none;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.lead-card {
+		background: var(--bg-card);
+		border: 1px solid var(--border-subtle);
+		border-radius: var(--radius-md);
+		padding: 0.75rem;
+		display: flex;
+		gap: 0.5rem;
+		cursor: pointer;
+		transition: background var(--dur-fast), border-color var(--dur-fast);
+		-webkit-tap-highlight-color: transparent;
+	}
+
+	.lead-card:hover,
+	.lead-card:focus {
+		background: rgba(255, 255, 255, 0.04);
+		border-color: var(--border-strong);
+		outline: none;
+	}
+
+	.lead-card.card-selected {
+		background: rgba(107, 33, 168, 0.12);
+		border-color: rgba(124, 58, 237, 0.35);
+	}
+
+	.card-check {
+		display: flex;
+		align-items: flex-start;
+		padding-top: 0.1rem;
+		flex-shrink: 0;
+	}
+
+	.card-body {
+		flex: 1;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+	}
+
+	.card-top {
+		display: flex;
+		justify-content: space-between;
+		align-items: baseline;
+		gap: 0.5rem;
+	}
+
+	.card-name {
+		font-weight: 600;
+		font-size: 0.95rem;
+		color: var(--text-primary);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.card-score {
+		font-family: var(--font-display);
+		font-size: 1.15rem;
+		font-weight: 700;
+		flex-shrink: 0;
+	}
+
+	.card-badges {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		flex-wrap: wrap;
+	}
+
+	.card-addr {
+		font-size: 0.78rem;
+		color: var(--text-muted);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.card-meta {
+		font-size: 0.78rem;
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+	}
+
+	.card-empty {
+		text-align: center;
+		color: var(--text-muted);
+		opacity: 0.6;
+		padding: 3rem 1rem;
+		background: var(--bg-card);
+		border: 1px solid var(--border-subtle);
+		border-radius: var(--radius-md);
+	}
+
+	/* Responsive breakpoints */
+	@media (max-width: 768px) {
+		main {
+			padding: 1rem;
+		}
+
+		.controls {
+			flex-direction: column;
+			align-items: stretch;
+		}
+
+		.search-wrap {
+			width: 100%;
+		}
+
+		.search-input {
+			width: 100% !important;
+			transition: border-color var(--dur-fast);
+		}
+
+		.search-input:focus {
+			width: 100% !important;
+		}
+
+		.filters {
+			width: 100%;
+		}
+
+		.filters label {
+			flex: 1;
+		}
+
+		.filters select {
+			width: 100%;
+		}
+
+		.right-controls {
+			margin-left: 0;
+			flex-wrap: wrap;
+		}
+
+		.right-controls button {
+			flex: 1;
+			min-height: 44px;
+			justify-content: center;
+		}
+
+		.table-wrap {
+			display: none;
+		}
+
+		.card-list {
+			display: flex;
+		}
+	}
+
+	@media (max-width: 640px) {
+		.form-grid {
+			grid-template-columns: 1fr;
+		}
+
+		.field-full {
+			grid-column: 1;
+		}
 	}
 </style>

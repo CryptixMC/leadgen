@@ -129,6 +129,8 @@
 		<span class="count">{Object.values(columns).reduce((n, col) => n + col.length, 0)} leads</span>
 	</div>
 
+	<p class="swipe-hint">Swipe to see all stages →</p>
+
 	<div class="board">
 		{#each COLUMNS as col}
 			{@const leads = columns[col.key]}
@@ -358,5 +360,36 @@
 		font-size: 0.8rem;
 		text-align: center;
 		padding: 1rem 0;
+	}
+
+	.swipe-hint {
+		display: none;
+		font-size: 0.75rem;
+		color: var(--text-muted);
+		margin-bottom: 0.75rem;
+		opacity: 0.7;
+	}
+
+	@media (max-width: 768px) {
+		main {
+			padding: 1rem;
+		}
+
+		.swipe-hint {
+			display: block;
+		}
+
+		.column {
+			min-width: 230px;
+			width: 230px;
+		}
+
+		.col-body {
+			padding: 0.5rem;
+		}
+
+		.card {
+			padding: 0.65rem 0.75rem;
+		}
 	}
 </style>

@@ -251,4 +251,20 @@
 		padding: 3rem 0;
 		text-align: center;
 	}
+
+	@media (max-width: 768px) {
+		main {
+			padding: 1rem;
+			gap: 1rem;
+		}
+
+		.chart-section {
+			padding: 1rem;
+		}
+
+		.chart-wrap {
+			height: 220px;
+			overflow-x: auto;
+		}
+	}
 </style>
