@@ -1,184 +1,199 @@
-import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
-
 export interface InvoiceData {
 	invoiceNumber: string;
 	issueDate: string;
 	dueDate: string;
 	clientName: string;
 	clientAddress: string;
+	clientCity?: string;
 	clientEmail?: string;
 	lineItems: { description: string; qty: number; rate: number }[];
-	taxRate?: number;   // e.g. 5 for 5%
-	taxLabel?: string;  // e.g. "GST (5%)"
-	paymentTerms: string;
-	fromEmail?: string;
-	fromWebsite?: string;
+	taxRate?: number;
+	taxLabel?: string;
+	notes?: string;
 }
-
-const BLACK      = rgb(0,    0,    0);
-const GRAY       = rgb(0.4,  0.4,  0.4);
-const LIGHT_GRAY = rgb(0.75, 0.75, 0.75);
-const PURPLE     = rgb(0.55, 0.2,  0.85);
 
 function fmt$(n: number): string {
 	return '$' + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
-export async function generateInvoice(data: InvoiceData): Promise<Uint8Array> {
-	const doc  = await PDFDocument.create();
-	const page = doc.addPage([595, 842]); // A4
-	const { width, height } = page.getSize();
+export function generateInvoiceHtml(data: InvoiceData): string {
+	const taxRate = Number(data.taxRate ?? 5);
+	const taxLabel = data.taxLabel ?? `GST (${taxRate}%)`;
+	const subtotal = data.lineItems.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.rate) || 0), 0);
+	const tax = subtotal * (taxRate / 100);
+	const total = subtotal + tax;
 
-	const bold    = await doc.embedFont(StandardFonts.HelveticaBold);
-	const regular = await doc.embedFont(StandardFonts.Helvetica);
+	const rows = data.lineItems.map((it, i) => {
+		const amt = (Number(it.qty) || 0) * (Number(it.rate) || 0);
+		return `
+		<tr style="background:${i % 2 === 1 ? 'rgba(255,255,255,0.025)' : 'transparent'}">
+			<td style="padding:12px 0;border-bottom:1px solid #1E1E2E;font-family:'DM Sans',sans-serif;font-size:14px;color:#F5F0FF;">${esc(it.description)}</td>
+			<td style="padding:12px 14px;border-bottom:1px solid #1E1E2E;text-align:center;width:60px;font-family:'DM Sans',sans-serif;font-size:14px;color:#F5F0FF;">${esc(String(it.qty))}</td>
+			<td style="padding:12px 14px;border-bottom:1px solid #1E1E2E;text-align:right;width:96px;font-family:'DM Sans',sans-serif;font-size:14px;color:#F5F0FF;">${esc(fmt$(Number(it.rate) || 0))}</td>
+			<td style="padding:12px 0 12px 14px;border-bottom:1px solid #1E1E2E;text-align:right;width:104px;font-family:'JetBrains Mono',monospace;font-size:13px;color:#F5F0FF;">${fmt$(amt)}</td>
+		</tr>`;
+	}).join('');
 
-	const L = 50;
-	const R = width - 50;
+	return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Invoice ${esc(data.invoiceNumber)}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&family=JetBrains+Mono:wght@400;700;800&family=Syne:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0;background:#080810;font-family:'DM Sans',sans-serif;}
+@keyframes blob-a{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(14px,-16px) scale(1.08)}}
+@keyframes blob-b{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(-12px,14px) scale(1.1)}}
+.no-print{display:block}
+@media print{
+  .no-print{display:none!important}
+  @page{margin:0;size:A4}
+  *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+  body{background:#0A0A0F!important;margin:0!important}
+  #inv-doc{box-shadow:none!important;border:none!important;margin:0 auto!important}
+}
+</style>
+</head>
+<body>
 
-	const fromEmail   = data.fromEmail   ?? 'liam@liamnicholson.ca';
-	const fromWebsite = data.fromWebsite ?? 'liamnicholson.ca';
+<!-- Toolbar -->
+<div class="no-print" style="position:sticky;top:0;z-index:100;background:rgba(8,8,16,0.9);backdrop-filter:blur(12px);border-bottom:1px solid #1E1E2E;padding:13px 32px;display:flex;justify-content:space-between;align-items:center;">
+  <span style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.16em;text-transform:uppercase;color:#D946EF;">// invoice</span>
+  <button onclick="window.print()" style="padding:7px 20px;background:linear-gradient(135deg,#7C3AED,#D946EF);border:none;border-radius:6px;color:#0A0A0F;font-family:'Syne',sans-serif;font-size:12px;font-weight:700;letter-spacing:0.06em;cursor:pointer;">Print / Export PDF</button>
+</div>
 
-	let y = height - 50;
+<!-- Document card -->
+<div id="inv-doc" style="max-width:794px;margin:40px auto 80px;background:#0A0A0F;border:1px solid rgba(255,255,255,0.05);box-shadow:0 24px 80px rgba(0,0,0,0.65);position:relative;overflow:hidden;">
 
-	// ── Header ──────────────────────────────────────────────────────────────────
-	page.drawText('Liam Nicholson', { x: L, y, font: bold, size: 20, color: BLACK });
+  <!-- Glow blobs -->
+  <div style="position:absolute;width:380px;height:380px;top:-130px;right:-60px;background:radial-gradient(circle,rgba(124,58,237,0.22) 0%,transparent 70%);filter:blur(80px);pointer-events:none;animation:blob-a 11s ease-in-out infinite;"></div>
+  <div style="position:absolute;width:300px;height:300px;bottom:60px;left:-80px;background:radial-gradient(circle,rgba(217,70,239,0.18) 0%,transparent 70%);filter:blur(80px);pointer-events:none;animation:blob-b 9s ease-in-out infinite;"></div>
 
-	// "INVOICE" top-right with purple number below
-	const invLabel = 'INVOICE';
-	const invLabelW = bold.widthOfTextAtSize(invLabel, 22);
-	page.drawText(invLabel, { x: R - invLabelW, y, font: bold, size: 22, color: BLACK });
+  <div style="position:relative;padding:64px;">
 
-	y -= 18;
-	page.drawText('Business Tech Consultant', { x: L, y, font: regular, size: 10, color: GRAY });
+    <!-- HEADER -->
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:48px;">
+      <div style="display:flex;align-items:center;gap:14px;">
+        <div style="width:44px;height:44px;flex-shrink:0;border-radius:10px;background:linear-gradient(135deg,#7C3AED,#D946EF);display:flex;align-items:center;justify-content:center;box-shadow:0 0 22px rgba(217,70,239,0.3);">
+          <span style="font-family:'JetBrains Mono',monospace;font-weight:800;font-size:17px;letter-spacing:-0.04em;color:#0A0A0F;">LN.</span>
+        </div>
+        <div>
+          <div style="font-family:'JetBrains Mono',monospace;font-weight:700;font-size:20px;line-height:1.1;letter-spacing:-0.02em;color:#F5F0FF;">Liam Nicholson<span style="color:#D946EF;">.</span></div>
+          <div style="margin-top:4px;font-family:'Syne',sans-serif;font-weight:500;font-size:10px;letter-spacing:0.22em;text-transform:uppercase;color:#9090B0;">Business Tech Consultant</div>
+        </div>
+      </div>
+      <div style="text-align:right;">
+        <div style="font-family:'JetBrains Mono',monospace;font-weight:800;font-size:34px;line-height:1;letter-spacing:-0.03em;color:#F5F0FF;">INVOICE</div>
+        <div style="margin-top:9px;font-family:'JetBrains Mono',monospace;font-size:13px;letter-spacing:0.1em;color:#D946EF;">${esc(data.invoiceNumber)}</div>
+      </div>
+    </div>
 
-	const numStr  = data.invoiceNumber;
-	const numStrW = regular.widthOfTextAtSize(numStr, 9);
-	page.drawText(numStr, { x: R - numStrW, y, font: regular, size: 9, color: PURPLE });
+    <!-- Divider -->
+    <div style="height:1px;background:#1E1E2E;margin-bottom:40px;"></div>
 
-	y -= 18;
-	page.drawLine({ start: { x: L, y }, end: { x: R, y }, thickness: 0.75, color: LIGHT_GRAY });
-	y -= 22;
+    <!-- FROM / BILL TO / DATES -->
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:32px;margin-bottom:40px;">
 
-	// ── Three-column info block: FROM | BILL TO | DATES ──────────────────────
-	const col1 = L;
-	const col2 = L + 170;
-	const col3 = L + 350;
+      <div>
+        <div style="font-family:'Syne',sans-serif;font-size:10px;font-weight:600;letter-spacing:0.22em;text-transform:uppercase;color:#D946EF;margin-bottom:14px;">// from</div>
+        <div style="display:flex;flex-direction:column;gap:3px;">
+          <span style="font-family:'DM Sans',sans-serif;font-size:14px;font-weight:500;color:#F5F0FF;">Liam Nicholson</span>
+          <span style="font-family:'DM Sans',sans-serif;font-size:13px;color:#9090B0;">Business Tech Consultant</span>
+          <span style="font-family:'DM Sans',sans-serif;font-size:13px;color:#9090B0;">Winnipeg, MB</span>
+          <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#9090B0;margin-top:6px;">liam@liamnicholson.ca</span>
+          <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#9090B0;">(204) 557-0596</span>
+        </div>
+      </div>
 
-	function sectionLabel(label: string, cx: number, cy: number) {
-		page.drawText('// ' + label, { x: cx, y: cy, font: bold, size: 8, color: PURPLE });
-	}
+      <div>
+        <div style="font-family:'Syne',sans-serif;font-size:10px;font-weight:600;letter-spacing:0.22em;text-transform:uppercase;color:#D946EF;margin-bottom:14px;">// bill to</div>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <span style="font-family:'DM Sans',sans-serif;font-size:14px;font-weight:500;color:#F5F0FF;">${esc(data.clientName)}</span>
+          ${data.clientAddress ? `<span style="font-family:'DM Sans',sans-serif;font-size:13px;color:#9090B0;">${esc(data.clientAddress)}</span>` : ''}
+          ${data.clientCity ? `<span style="font-family:'DM Sans',sans-serif;font-size:13px;color:#9090B0;">${esc(data.clientCity)}</span>` : ''}
+          ${data.clientEmail ? `<span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#9090B0;margin-top:4px;">${esc(data.clientEmail)}</span>` : ''}
+        </div>
+      </div>
 
-	sectionLabel('FROM', col1, y);
-	sectionLabel('BILL TO', col2, y);
-	sectionLabel('DATES', col3, y);
-	y -= 14;
+      <div>
+        <div style="font-family:'Syne',sans-serif;font-size:10px;font-weight:600;letter-spacing:0.22em;text-transform:uppercase;color:#D946EF;margin-bottom:14px;">// dates</div>
+        <div style="display:flex;flex-direction:column;gap:18px;">
+          <div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:#3a3a55;margin-bottom:5px;">issued</div>
+            <div style="font-family:'DM Sans',sans-serif;font-size:14px;color:#F5F0FF;">${esc(data.issueDate)}</div>
+          </div>
+          <div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:#3a3a55;margin-bottom:5px;">due</div>
+            <div style="font-family:'DM Sans',sans-serif;font-size:14px;color:#F5F0FF;">${esc(data.dueDate)}</div>
+          </div>
+        </div>
+      </div>
 
-	// FROM column
-	let fy = y;
-	page.drawText('Liam Nicholson',       { x: col1, y: fy, font: bold,    size: 10, color: BLACK }); fy -= 13;
-	page.drawText('Business Tech Consultant', { x: col1, y: fy, font: regular, size: 9,  color: GRAY  }); fy -= 13;
-	page.drawText('Winnipeg, MB',          { x: col1, y: fy, font: regular, size: 9,  color: GRAY  }); fy -= 13;
-	page.drawText(fromEmail,               { x: col1, y: fy, font: regular, size: 9,  color: GRAY  }); fy -= 13;
-	page.drawText('(204) 557-0596',        { x: col1, y: fy, font: regular, size: 9,  color: GRAY  });
+    </div>
 
-	// BILL TO column
-	let by = y;
-	page.drawText(data.clientName,    { x: col2, y: by, font: bold,    size: 10, color: BLACK }); by -= 13;
-	if (data.clientAddress) {
-		page.drawText(data.clientAddress, { x: col2, y: by, font: regular, size: 9, color: GRAY }); by -= 13;
-	}
-	if (data.clientEmail) {
-		page.drawText(data.clientEmail,   { x: col2, y: by, font: regular, size: 9, color: GRAY });
-	}
+    <!-- Divider -->
+    <div style="height:1px;background:#1E1E2E;"></div>
 
-	// DATES column
-	let dy = y;
-	page.drawText('ISSUED',       { x: col3, y: dy, font: bold,    size: 8,  color: GRAY  }); dy -= 13;
-	page.drawText(data.issueDate, { x: col3, y: dy, font: regular, size: 10, color: BLACK }); dy -= 18;
-	page.drawText('DUE',          { x: col3, y: dy, font: bold,    size: 8,  color: GRAY  }); dy -= 13;
-	page.drawText(data.dueDate,   { x: col3, y: dy, font: regular, size: 10, color: BLACK });
+    <!-- LINE ITEMS -->
+    <table style="width:100%;border-collapse:collapse;">
+      <thead>
+        <tr>
+          <th style="font-family:'Syne',sans-serif;font-size:10px;font-weight:600;letter-spacing:0.18em;text-transform:uppercase;color:#9090B0;text-align:left;padding:15px 0;border-bottom:1px solid #1E1E2E;">Description</th>
+          <th style="font-family:'Syne',sans-serif;font-size:10px;font-weight:600;letter-spacing:0.18em;text-transform:uppercase;color:#9090B0;text-align:center;padding:15px 14px;border-bottom:1px solid #1E1E2E;width:60px;">Qty</th>
+          <th style="font-family:'Syne',sans-serif;font-size:10px;font-weight:600;letter-spacing:0.18em;text-transform:uppercase;color:#9090B0;text-align:right;padding:15px 14px;border-bottom:1px solid #1E1E2E;width:96px;">Rate</th>
+          <th style="font-family:'Syne',sans-serif;font-size:10px;font-weight:600;letter-spacing:0.18em;text-transform:uppercase;color:#9090B0;text-align:right;padding:15px 0 15px 14px;border-bottom:1px solid #1E1E2E;width:104px;">Amount</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
 
-	y -= 72;
-	page.drawLine({ start: { x: L, y }, end: { x: R, y }, thickness: 0.75, color: LIGHT_GRAY });
-	y -= 20;
+    <!-- TOTALS -->
+    <div style="display:flex;justify-content:flex-end;padding:32px 0 40px;">
+      <div style="width:280px;display:flex;flex-direction:column;">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:11px 0;border-bottom:1px solid #1E1E2E;">
+          <span style="font-family:'DM Sans',sans-serif;font-size:14px;color:#9090B0;">Subtotal</span>
+          <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#F5F0FF;">${fmt$(subtotal)}</span>
+        </div>
+        ${tax > 0 ? `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:11px 0;border-bottom:1px solid #1E1E2E;">
+          <span style="font-family:'DM Sans',sans-serif;font-size:14px;color:#9090B0;">${esc(taxLabel)}</span>
+          <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#F5F0FF;">${fmt$(tax)}</span>
+        </div>` : ''}
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 0 0;">
+          <span style="font-family:'Syne',sans-serif;font-size:11px;font-weight:700;letter-spacing:0.16em;text-transform:uppercase;color:#F5F0FF;">Total due</span>
+          <span style="font-family:'JetBrains Mono',monospace;font-weight:700;font-size:22px;background:linear-gradient(135deg,#7C3AED,#D946EF);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;letter-spacing:-0.01em;">${fmt$(total)}</span>
+        </div>
+      </div>
+    </div>
 
-	// ── Line items table ─────────────────────────────────────────────────────
-	const COL_QTY  = L + 310;
-	const COL_RATE = L + 380;
-	const COL_AMT  = R - 10;
+    <!-- NOTES -->
+    ${data.notes ? `
+    <div style="border-top:1px solid #1E1E2E;padding-top:32px;margin-bottom:48px;">
+      <div style="font-family:'Syne',sans-serif;font-size:10px;font-weight:600;letter-spacing:0.22em;text-transform:uppercase;color:#D946EF;margin-bottom:10px;">// notes</div>
+      <div style="font-family:'DM Sans',sans-serif;font-size:13px;line-height:1.75;color:#9090B0;">${esc(data.notes)}</div>
+    </div>` : '<div style="height:48px;"></div>'}
 
-	// Header row
-	page.drawText('DESCRIPTION', { x: L,        y, font: bold, size: 8, color: GRAY });
-	page.drawText('QTY',         { x: COL_QTY,  y, font: bold, size: 8, color: GRAY });
-	page.drawText('RATE',        { x: COL_RATE, y, font: bold, size: 8, color: GRAY });
-	page.drawText('AMOUNT',      { x: COL_AMT - regular.widthOfTextAtSize('AMOUNT', 8), y, font: bold, size: 8, color: GRAY });
-	y -= 8;
-	page.drawLine({ start: { x: L, y }, end: { x: R, y }, thickness: 0.4, color: LIGHT_GRAY });
-	y -= 16;
+    <!-- FOOTER -->
+    <div style="border-top:1px solid #1E1E2E;padding-top:22px;display:flex;justify-content:space-between;align-items:center;">
+      <span style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.06em;color:#9090B0;">liam@liamnicholson.ca</span>
+      <span style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.06em;color:#9090B0;">liamnicholson.ca</span>
+    </div>
 
-	// Compute subtotal
-	let subtotal = 0;
-	for (const item of data.lineItems) {
-		const amount = (Number(item.qty) || 0) * (Number(item.rate) || 0);
-		subtotal += amount;
+  </div>
+</div>
 
-		page.drawText(item.description, { x: L,       y, font: regular, size: 10, color: BLACK });
-		page.drawText(String(item.qty), { x: COL_QTY, y, font: regular, size: 10, color: BLACK });
+</body>
+</html>`;
+}
 
-		const rateStr = fmt$(Number(item.rate) || 0);
-		page.drawText(rateStr, { x: COL_RATE, y, font: regular, size: 10, color: BLACK });
+function esc(s: string): string {
+	return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
 
-		const amtStr = fmt$(amount);
-		const amtW   = regular.widthOfTextAtSize(amtStr, 10);
-		page.drawText(amtStr, { x: COL_AMT - amtW, y, font: regular, size: 10, color: BLACK });
-
-		y -= 20;
-	}
-
-	y -= 8;
-	page.drawLine({ start: { x: L, y }, end: { x: R, y }, thickness: 0.4, color: LIGHT_GRAY });
-	y -= 20;
-
-	// ── Totals ────────────────────────────────────────────────────────────────
-	const taxRate  = Number(data.taxRate)  || 0;
-	const taxLabel = data.taxLabel         ?? (taxRate > 0 ? `GST (${taxRate}%)` : 'Tax');
-	const taxAmt   = subtotal * (taxRate / 100);
-	const total    = subtotal + taxAmt;
-
-	function drawTotalRow(label: string, value: string, isBold: boolean) {
-		const font  = isBold ? bold : regular;
-		const size  = isBold ? 12 : 10;
-		const color = isBold ? BLACK : GRAY;
-		const valW  = font.widthOfTextAtSize(value, size);
-		const labW  = font.widthOfTextAtSize(label, size);
-		page.drawText(label, { x: R - 180 - labW, y, font, size, color });
-		page.drawText(value, { x: R - valW,        y, font, size, color: BLACK });
-		y -= size + 6;
-	}
-
-	drawTotalRow('Subtotal', fmt$(subtotal), false);
-	if (taxAmt > 0) {
-		drawTotalRow(taxLabel, fmt$(taxAmt), false);
-	}
-	y -= 4;
-	page.drawLine({ start: { x: R - 200, y }, end: { x: R, y }, thickness: 0.75, color: BLACK });
-	y -= 6;
-	drawTotalRow('TOTAL DUE', fmt$(total), true);
-
-	y -= 16;
-	page.drawLine({ start: { x: L, y }, end: { x: R, y }, thickness: 0.75, color: LIGHT_GRAY });
-	y -= 20;
-
-	// ── Notes / Payment Terms ─────────────────────────────────────────────────
-	sectionLabel('NOTES', L, y);
-	y -= 14;
-	page.drawText(data.paymentTerms, { x: L, y, font: regular, size: 10, color: BLACK });
-
-	// ── Footer ────────────────────────────────────────────────────────────────
-	const footerY = 30;
-	page.drawText(fromEmail,   { x: L, y: footerY, font: regular, size: 9, color: GRAY });
-	const siteW = regular.widthOfTextAtSize(fromWebsite, 9);
-	page.drawText(fromWebsite, { x: R - siteW, y: footerY, font: regular, size: 9, color: GRAY });
-
-	return doc.save();
+// Legacy PDF export — kept for compatibility; returns HTML opened in browser now
+export async function generateInvoice(data: InvoiceData): Promise<string> {
+	return generateInvoiceHtml(data);
 }
