@@ -130,7 +130,8 @@ async function upsertPlace(place: Record<string, unknown>, apiKey: string): Prom
 export async function runScrape(
 	category: string,
 	city: string,
-	target: number
+	target: number,
+	neighborhood?: string
 ): Promise<{ upserted: number; category: string; city: string; pages_fetched: number }> {
 	const apiKey = GOOGLE_PLACES_API_KEY;
 	if (!apiKey) throw new Error('GOOGLE_PLACES_API_KEY not configured');
@@ -138,12 +139,13 @@ export async function runScrape(
 	const safeTarget = Math.max(1, target);
 	let upserted = 0;
 	let pagesFetched = 0;
-	let cityLat: number | null = null;
-	let cityLng: number | null = null;
+	let seedLat: number | null = null;
+	let seedLng: number | null = null;
 
 	const sem = new Semaphore(8);
 
 	const upsertSafe = async (place: Record<string, unknown>): Promise<boolean> => {
+		if (!isCommercialPlace(place)) return false;
 		await sem.acquire();
 		try {
 			return await upsertPlace(place, apiKey);
@@ -152,8 +154,66 @@ export async function runScrape(
 		}
 	};
 
+	const allBusinesses = !category || category === '*';
+
+	// Types that indicate a non-commercial place — filter these out in "all businesses" mode
+	const NON_BUSINESS_TYPES = new Set([
+		'tourist_attraction',
+		'natural_feature',
+		'park',
+		'route',
+		'political',
+		'transit_station',
+		'train_station',
+		'bus_station',
+		'subway_station',
+		'airport',
+		'stadium',
+		'amusement_park',
+		'cemetery',
+		'city_hall',
+		'courthouse',
+		'embassy',
+		'fire_station',
+		'funeral_home',
+		'library',
+		'local_government_office',
+		'police',
+		'post_office'
+	]);
+
+	function isCommercialPlace(place: Record<string, unknown>): boolean {
+		if (!allBusinesses) return true;
+		const types = (place.types as string[]) ?? [];
+		return !types.some((t) => NON_BUSINESS_TYPES.has(t));
+	}
+
+	// Build the text search query — neighborhood-scoped if provided
+	const locationLabel = neighborhood ? `${neighborhood}, ${city}` : city;
+	const searchQuery = allBusinesses
+		? `establishments in ${locationLabel}`
+		: neighborhood
+			? `${category} in ${neighborhood}, ${city}`
+			: `${category} in ${city}`;
+
+	// If a neighborhood is given, geocode it first for a tight nearby-search radius
+	if (neighborhood) {
+		const geoData = await getWithBackoff(PLACES_SEARCH_URL, {
+			query: `${neighborhood}, ${city}`,
+			key: apiKey
+		});
+		const geoPlaces = (geoData.results as Array<Record<string, unknown>>) ?? [];
+		if (geoPlaces.length) {
+			const loc = (geoPlaces[0].geometry as Record<string, unknown>)?.location as
+				| Record<string, number>
+				| undefined;
+			seedLat = loc?.lat ?? null;
+			seedLng = loc?.lng ?? null;
+		}
+	}
+
 	const searchData = await getWithBackoff(PLACES_SEARCH_URL, {
-		query: `${category} in ${city}`,
+		query: searchQuery,
 		key: apiKey
 	});
 
@@ -165,30 +225,33 @@ export async function runScrape(
 	pagesFetched++;
 	const places = (searchData.results as Array<Record<string, unknown>>) ?? [];
 
-	if (places.length) {
+	if (places.length && seedLat === null) {
 		const loc = (places[0].geometry as Record<string, unknown>)?.location as
 			| Record<string, number>
 			| undefined;
-		cityLat = loc?.lat ?? null;
-		cityLng = loc?.lng ?? null;
+		seedLat = loc?.lat ?? null;
+		seedLng = loc?.lng ?? null;
 	}
 
 	const batch = places.slice(0, safeTarget);
 	const results = await Promise.all(batch.map(upsertSafe));
 	upserted += results.filter(Boolean).length;
 
-	if (upserted < safeTarget && cityLat !== null) {
+	if (upserted < safeTarget && seedLat !== null) {
+		// Use tighter radius for neighborhood searches
+		const radius = neighborhood ? 800 : 50000;
 		let nextPageToken: string | null = null;
 		let firstNearby = true;
 
 		while (upserted < safeTarget) {
-			const nearbyData = await fetchNearbyPage(
-				apiKey,
-				category,
-				cityLat,
-				cityLng!,
-				firstNearby ? null : nextPageToken
-			);
+			const nearbyData = firstNearby
+				? await getWithBackoff(PLACES_NEARBY_URL, {
+						location: `${seedLat},${seedLng}`,
+						radius,
+						...(allBusinesses ? {} : { keyword: category }),
+						key: apiKey
+					})
+				: await fetchNearbyPage(apiKey, category, seedLat, seedLng!, nextPageToken);
 			firstNearby = false;
 
 			const nearbyStatus = nearbyData.status as string;
@@ -207,5 +270,5 @@ export async function runScrape(
 		}
 	}
 
-	return { upserted, category, city, pages_fetched: pagesFetched };
+	return { upserted, category: allBusinesses ? 'all businesses' : category, city, pages_fetched: pagesFetched };
 }

@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { triggerScrape, fetchLeads, enrichLead } from '$lib/api';
 
+	let allBusinesses = $state(false);
 	let category = $state('');
 	let city = $state('Winnipeg MB');
+	let neighborhood = $state('');
 	let target = $state(60);
 	let loading = $state(false);
 	let result = $state<{ upserted: number; category: string; city: string; pages_fetched: number } | null>(null);
@@ -40,14 +42,14 @@
 
 	async function handleSubmit(e: Event) {
 		e.preventDefault();
-		if (!category.trim()) return;
+		if (!allBusinesses && !category.trim()) return;
 
 		loading = true;
 		error = '';
 		result = null;
 
 		try {
-			result = await triggerScrape(category.trim(), city.trim(), target);
+			result = await triggerScrape(allBusinesses ? '' : category.trim(), city.trim(), target, neighborhood.trim() || undefined);
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Scrape failed';
 		} finally {
@@ -66,15 +68,25 @@
 
 	<form onsubmit={handleSubmit} class="card">
 		<div class="field">
-			<label for="category">Category</label>
-			<input
-				id="category"
-				type="text"
-				bind:value={category}
-				placeholder="e.g. restaurant, plumber, dentist"
-				required
-				disabled={loading}
-			/>
+			<div class="category-header">
+				<label for="category">Category</label>
+				<label class="all-toggle">
+					<input type="checkbox" bind:checked={allBusinesses} disabled={loading} />
+					All business types
+				</label>
+			</div>
+			{#if !allBusinesses}
+				<input
+					id="category"
+					type="text"
+					bind:value={category}
+					placeholder="e.g. restaurant, plumber, dentist"
+					required
+					disabled={loading}
+				/>
+			{:else}
+				<div class="all-badge">Every type of business — no filter applied</div>
+			{/if}
 		</div>
 
 		<div class="field">
@@ -90,6 +102,18 @@
 		</div>
 
 		<div class="field">
+			<label for="neighborhood">Neighborhood <span class="optional">(optional)</span></label>
+			<input
+				id="neighborhood"
+				type="text"
+				bind:value={neighborhood}
+				placeholder="e.g. Exchange District, St. Vital"
+				disabled={loading}
+			/>
+			<p class="field-hint">Narrows the search to a specific area — great for D2D walking routes.</p>
+		</div>
+
+		<div class="field">
 			<label for="target">Target leads</label>
 			<input
 				id="target"
@@ -102,7 +126,7 @@
 			/>
 		</div>
 
-		<button type="submit" class="submit-btn" disabled={loading || !category.trim()}>
+		<button type="submit" class="submit-btn" disabled={loading || (!allBusinesses && !category.trim())}>
 			{loading ? 'Scraping…' : 'Run Scrape'}
 		</button>
 	</form>
@@ -110,7 +134,7 @@
 	{#if loading}
 		<div class="status-card info">
 			<span class="spinner"></span>
-			Scraping up to <strong>{target}</strong> leads for <strong>{category}</strong> in <strong>{city}</strong>…
+			Scraping up to <strong>{target}</strong> leads for <strong>{category}</strong> in {neighborhood.trim() ? `<strong>${neighborhood}</strong>, ` : ''}<strong>{city}</strong>…
 		</div>
 	{/if}
 
@@ -236,6 +260,56 @@
 	input::placeholder {
 		color: var(--text-muted);
 		opacity: 0.5;
+	}
+
+	.category-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+	}
+
+	.all-toggle {
+		display: flex;
+		align-items: center;
+		gap: 0.35rem;
+		font-family: var(--font-ui);
+		font-size: 0.72rem;
+		font-weight: 500;
+		color: var(--text-muted);
+		text-transform: none;
+		letter-spacing: 0;
+		cursor: pointer;
+	}
+
+	.all-toggle input[type='checkbox'] {
+		width: auto;
+		accent-color: var(--accent-primary);
+		cursor: pointer;
+	}
+
+	.all-badge {
+		background: rgba(124, 58, 237, 0.1);
+		border: 1px dashed rgba(124, 58, 237, 0.35);
+		color: #a78bfa;
+		padding: 0.55rem 0.85rem;
+		border-radius: var(--radius-sm);
+		font-size: 0.8rem;
+	}
+
+	.optional {
+		font-weight: 400;
+		text-transform: none;
+		letter-spacing: 0;
+		color: var(--text-muted);
+		opacity: 0.6;
+		font-size: 0.7rem;
+	}
+
+	.field-hint {
+		color: var(--text-muted);
+		font-size: 0.72rem;
+		opacity: 0.65;
+		margin: 0;
 	}
 
 	input:disabled {
