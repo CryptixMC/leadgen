@@ -1,6 +1,6 @@
 import { load as cheerioLoad } from 'cheerio';
 import { SOCIAL_MEDIA_DOMAINS, AGGREGATOR_DOMAINS, isSocialMediaUrl, isAggregatorUrl, getSocialPlatform } from './utils.js';
-import { GOOGLE_PAGESPEED_API_KEY, YELP_API_KEY } from '$env/static/private';
+import { GOOGLE_PAGESPEED_API_KEY, YELP_API_KEY, GOOGLE_PLACES_API_KEY } from '$env/static/private';
 
 const PAGESPEED_URL = 'https://www.googleapis.com/pagespeedonline/v5/runPagespeed';
 const YELP_SEARCH_URL = 'https://api.yelp.com/v3/businesses/search';
@@ -503,6 +503,22 @@ async function discoverWebsiteGoogle(
 	return { websiteUrl: null, discoveredSocial };
 }
 
+async function fetchGbpWebsite(placeId: string): Promise<string | null> {
+	if (!GOOGLE_PLACES_API_KEY) return null;
+	try {
+		const params = new URLSearchParams({ place_id: placeId, fields: 'website', key: GOOGLE_PLACES_API_KEY });
+		const resp = await fetch(
+			`https://maps.googleapis.com/maps/api/place/details/json?${params}`,
+			{ signal: withTimeout(5_000) }
+		);
+		if (!resp.ok) return null;
+		const data = await resp.json();
+		return (data.result?.website as string) ?? null;
+	} catch {
+		return null;
+	}
+}
+
 export async function resolveFinalUrl(url: string): Promise<string> {
 	try {
 		const resp = await fetch(url, {
@@ -535,6 +551,21 @@ export async function runEnrichment(lead: Record<string, unknown>, { deep = fals
 	if (gbpSocial) {
 		const platform = getSocialPlatform(gbpSocial);
 		if (platform && !enrichment[`${platform}_url`]) enrichment[`${platform}_url`] = gbpSocial;
+	}
+
+	// Re-fetch the GBP website field for existing leads that had social URLs discarded at scrape time
+	if (lead.google_place_id && !websiteUrl) {
+		const gbpWebsite = await fetchGbpWebsite(lead.google_place_id as string);
+		if (gbpWebsite && isSocialMediaUrl(gbpWebsite)) {
+			const platform = getSocialPlatform(gbpWebsite);
+			if (platform && !enrichment[`${platform}_url`]) enrichment[`${platform}_url`] = gbpWebsite;
+		} else if (gbpWebsite) {
+			// GBP now has a real website not present at scrape time — use it
+			websiteUrl = gbpWebsite;
+			enrichment.website_url = websiteUrl;
+			enrichment.has_website = true;
+			enrichment.has_https = websiteUrl.startsWith('https://');
+		}
 	}
 
 	if (isSocialMediaUrl(websiteUrl)) {
