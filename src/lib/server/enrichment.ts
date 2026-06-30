@@ -358,6 +358,14 @@ export async function resolveFinalUrl(url: string): Promise<string> {
 export async function runEnrichment(lead: Record<string, unknown>): Promise<Record<string, unknown>> {
 	const enrichment: Record<string, unknown> = {};
 
+	const biz = (lead.business_name as string) ?? '';
+	const addr = (lead.address as string) ?? '';
+	const phone = (lead.phone as string) ?? '';
+
+	// Yelp only needs business name/address/phone — start it immediately in parallel
+	// with the URL resolution + discovery chain so it doesn't sit idle waiting.
+	const yelpPromise = fetchYelp(biz, addr, phone);
+
 	let websiteUrl = lead.website_url as string | null;
 	let websiteInferred = Boolean(lead.website_inferred);
 
@@ -386,10 +394,7 @@ export async function runEnrichment(lead: Record<string, unknown>): Promise<Reco
 	}
 
 	if (!websiteUrl) {
-		const { websiteUrl: discovered, discoveredSocial } = await discoverWebsite(
-			(lead.business_name as string) ?? '',
-			(lead.address as string) ?? ''
-		);
+		const { websiteUrl: discovered, discoveredSocial } = await discoverWebsite(biz, addr);
 		if (discovered) {
 			websiteUrl = discovered;
 			websiteInferred = true;
@@ -401,16 +406,14 @@ export async function runEnrichment(lead: Record<string, unknown>): Promise<Reco
 		enrichment.website_inferred = websiteInferred;
 	}
 
-	const biz = (lead.business_name as string) ?? '';
-	const addr = (lead.address as string) ?? '';
-	const phone = (lead.phone as string) ?? '';
+	// URL chain is done — collect Yelp (likely already resolved by now)
+	const yelp = await yelpPromise;
 
 	if (websiteUrl) {
 		enrichment.has_https = websiteUrl.startsWith('https://');
-		const [pagespeed, websiteData, yelp] = await Promise.all([
+		const [pagespeed, websiteData] = await Promise.all([
 			fetchPagespeed(websiteUrl),
-			scrapeWebsite(websiteUrl),
-			fetchYelp(biz, addr, phone)
+			scrapeWebsite(websiteUrl)
 		]);
 		Object.assign(enrichment, pagespeed);
 		if (websiteData.email) enrichment.email = websiteData.email;
@@ -431,7 +434,6 @@ export async function runEnrichment(lead: Record<string, unknown>): Promise<Reco
 			pagespeed_seo: null,
 			pagespeed_best_practices: null
 		});
-		const yelp = await fetchYelp(biz, addr, phone);
 		Object.assign(enrichment, yelp);
 	}
 
