@@ -116,6 +116,12 @@
 		}
 	}
 
+	function selectNonEnriched() {
+		const next = new Set(selected);
+		filtered.filter((l) => l.also_on_yelp === null).forEach((l) => next.add(l.id));
+		selected = next;
+	}
+
 	async function enrichSelected() {
 		if (selected.size === 0) return;
 		enriching = true;
@@ -241,6 +247,9 @@
 					{deleting ? 'Deleting…' : `Delete ${selected.size} selected`}
 				</button>
 			{/if}
+			<button class="select-unenriched-btn" onclick={selectNonEnriched}>
+				Select unenriched
+			</button>
 			<button class="sort-btn" onclick={() => (sortAsc = !sortAsc)}>
 				Score {sortAsc ? '↑' : '↓'}
 			</button>
@@ -479,6 +488,23 @@
 		align-items: center;
 		gap: 0.5rem;
 		margin-left: auto;
+	}
+
+	.select-unenriched-btn {
+		background: transparent;
+		border: 1px solid var(--border-subtle);
+		color: var(--text-muted);
+		padding: 0.38rem 0.85rem;
+		border-radius: var(--radius-pill);
+		cursor: pointer;
+		font-family: var(--font-display);
+		font-size: 0.8rem;
+		transition: border-color var(--dur-fast), color var(--dur-fast);
+	}
+
+	.select-unenriched-btn:hover {
+		border-color: var(--accent-primary);
+		color: var(--text-primary);
 	}
 
 	.sort-btn {
