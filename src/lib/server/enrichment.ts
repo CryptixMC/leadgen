@@ -1,5 +1,12 @@
 import { load as cheerioLoad } from 'cheerio';
-import { SOCIAL_MEDIA_DOMAINS, AGGREGATOR_DOMAINS, isSocialMediaUrl, isAggregatorUrl, getSocialPlatform } from './utils.js';
+import {
+	SOCIAL_MEDIA_DOMAINS,
+	AGGREGATOR_DOMAINS,
+	isSocialMediaUrl,
+	isAggregatorUrl,
+	getSocialPlatform,
+	assertPublicHttpUrl
+} from './utils.js';
 import { GOOGLE_PAGESPEED_API_KEY, YELP_API_KEY, GOOGLE_PLACES_API_KEY } from '$env/static/private';
 
 const PAGESPEED_URL = 'https://www.googleapis.com/pagespeedonline/v5/runPagespeed';
@@ -31,6 +38,32 @@ const BOT_UA = 'Mozilla/5.0 (compatible; LeadGenBot/1.0)';
 
 function withTimeout(ms: number): AbortSignal {
 	return AbortSignal.timeout(ms);
+}
+
+/**
+ * fetch() wrapper for URLs sourced from lead data (user-supplied or search-discovered).
+ * Validates the target isn't a private/internal address before each request, and
+ * resolves redirects manually so a redirect can't be used to reach an internal target
+ * after the initial URL passed validation.
+ */
+async function fetchSsrfSafe(
+	url: string,
+	init: { method?: string; headers?: Record<string, string>; body?: BodyInit; signal?: AbortSignal } = {},
+	maxRedirects = 5
+): Promise<{ response: Response; finalUrl: string }> {
+	let target = url;
+	for (let hop = 0; hop <= maxRedirects; hop++) {
+		await assertPublicHttpUrl(target);
+		const resp = await fetch(target, { ...init, redirect: 'manual' });
+		if (resp.status >= 300 && resp.status < 400) {
+			const location = resp.headers.get('location');
+			if (!location) return { response: resp, finalUrl: target };
+			target = new URL(location, target).href;
+			continue;
+		}
+		return { response: resp, finalUrl: target };
+	}
+	throw new Error('Too many redirects');
 }
 
 export async function fetchPagespeed(url: string): Promise<Record<string, unknown>> {
@@ -201,7 +234,7 @@ export async function scrapeWebsite(url: string, { subpages = true } = {}): Prom
 		social_links: {} as Record<string, string>
 	};
 	try {
-		const resp = await fetch(url, {
+		const { response: resp } = await fetchSsrfSafe(url, {
 			headers: { 'User-Agent': BOT_UA },
 			signal: withTimeout(7_000)
 		});
@@ -259,7 +292,7 @@ export async function scrapeWebsite(url: string, { subpages = true } = {}): Prom
 
 			const subResults = await Promise.allSettled(
 				subPageHrefs.slice(0, 2).map(async (subUrl) => {
-					const subResp = await fetch(subUrl, {
+					const { response: subResp } = await fetchSsrfSafe(subUrl, {
 						headers: { 'User-Agent': BOT_UA },
 						signal: withTimeout(8_000)
 					});
@@ -521,12 +554,12 @@ async function fetchGbpWebsite(placeId: string): Promise<string | null> {
 
 export async function resolveFinalUrl(url: string): Promise<string> {
 	try {
-		const resp = await fetch(url, {
+		const { finalUrl } = await fetchSsrfSafe(url, {
 			method: 'HEAD',
 			headers: { 'User-Agent': BOT_UA },
 			signal: withTimeout(10_000)
 		});
-		return resp.url;
+		return finalUrl;
 	} catch {
 		return url;
 	}
