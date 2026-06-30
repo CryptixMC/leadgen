@@ -1187,6 +1187,7 @@
 	}
 
 	.form-row input[type='text'],
+	.form-row input[type='email'],
 	.form-row select,
 	.form-row textarea {
 		background: var(--bg-base);
@@ -1202,6 +1203,7 @@
 	}
 
 	.form-row input[type='text']:focus,
+	.form-row input[type='email']:focus,
 	.form-row select:focus,
 	.form-row textarea:focus {
 		border-color: var(--accent-primary);
