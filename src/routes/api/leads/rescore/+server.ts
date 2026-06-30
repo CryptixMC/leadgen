@@ -6,15 +6,25 @@ import { runEnrichment } from '$lib/server/enrichment';
 import { calculateScore } from '$lib/server/scoring';
 import { Semaphore } from '$lib/server/scraper';
 
-export const POST: RequestHandler = async ({ locals }) => {
+const RESCORE_STALE_HOURS = 24;
+
+export const POST: RequestHandler = async ({ locals, url }) => {
 	if (locals.demo) return json({ rescored: 0 });
 
 	requireAuth(locals);
-	const { data: leads, error: err } = await db.from('leads').select('*');
+
+	const force = url.searchParams.get('force') === 'true';
+	let query = db.from('leads').select('*');
+	if (!force) {
+		const cutoff = new Date(Date.now() - RESCORE_STALE_HOURS * 3_600_000).toISOString();
+		query = query.or(`last_updated.is.null,last_updated.lt.${cutoff}`);
+	}
+
+	const { data: leads, error: err } = await query;
 	if (err) throw error(500, err.message);
 
 	const now = new Date().toISOString();
-	const sem = new Semaphore(5);
+	const sem = new Semaphore(10);
 	let updated = 0;
 
 	await Promise.all(
