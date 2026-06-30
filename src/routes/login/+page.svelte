@@ -2,7 +2,7 @@
 	import { supabase } from '$lib/supabase.js';
 	import { goto } from '$app/navigation';
 	import favicon from '$lib/assets/favicon.svg';
-	import { enterDemo } from '$lib/demo/state';
+	import { enterDemo, clearDemo } from '$lib/demo/state';
 
 	let email = $state('');
 	let password = $state('');
@@ -33,6 +33,7 @@
 		const maxAge = data.session.expires_in ?? 3600;
 		document.cookie = `sb_access_token=${data.session.access_token}; path=/; max-age=${maxAge}; SameSite=Lax`;
 
+		clearDemo();
 		goto('/');
 	}
 </script>
