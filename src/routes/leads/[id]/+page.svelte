@@ -55,16 +55,32 @@
 		return String(val);
 	}
 
+	let deepEnriching = $state(false);
+
 	async function handleEnrich() {
 		enriching = true;
 		enrichMsg = '';
 		try {
 			lead = await enrichLead(lead.id);
-			enrichMsg = 'Enriched!';
+			enrichMsg = 'Done!';
 		} catch {
 			enrichMsg = 'Enrichment failed.';
 		} finally {
 			enriching = false;
+		}
+		setTimeout(() => (enrichMsg = ''), 3000);
+	}
+
+	async function handleDeepEnrich() {
+		deepEnriching = true;
+		enrichMsg = '';
+		try {
+			lead = await enrichLead(lead.id, { deep: true });
+			enrichMsg = 'Deep scan done!';
+		} catch {
+			enrichMsg = 'Deep scan failed.';
+		} finally {
+			deepEnriching = false;
 		}
 		setTimeout(() => (enrichMsg = ''), 3000);
 	}
@@ -206,8 +222,11 @@
 		<button class="back-btn" onclick={() => goto('/')}>← Back</button>
 		<div class="back-actions">
 			{#if enrichMsg}<span class="save-msg">{enrichMsg}</span>{/if}
-			<button class="enrich-btn" onclick={handleEnrich} disabled={enriching}>
-				{enriching ? 'Enriching… (30s)' : 'Enrich Lead'}
+			<button class="enrich-btn" onclick={handleEnrich} disabled={enriching || deepEnriching} title="Quick scan: Yelp, website, email, social links (~10s)">
+				{enriching ? 'Scanning…' : 'Quick Scan'}
+			</button>
+			<button class="enrich-btn deep-btn" onclick={handleDeepEnrich} disabled={enriching || deepEnriching} title="Deep scan: everything + PageSpeed score + screenshot (~60s)">
+				{deepEnriching ? 'Deep scanning…' : 'Deep Scan'}
 			</button>
 			{#if lead.email}
 				<button class="email-btn" onclick={openEmailModal}>Send Email</button>
@@ -322,6 +341,62 @@
 				<dd class="mono">{lead.google_place_id}</dd>
 			</dl>
 		</section>
+
+		<!-- Outreach Intel -->
+		{#if lead.owner_name || lead.opening_hours?.length || lead.price_level != null || lead.last_review_date || lead.owner_response_rate != null || lead.social_activity_score != null}
+		<section class="card">
+			<h2>Outreach Intel</h2>
+			<dl>
+				{#if lead.owner_name}
+					<dt>Contact</dt>
+					<dd>
+						{lead.owner_name}
+						{#if lead.linkedin_search_url}
+							<a href={lead.linkedin_search_url} target="_blank" rel="noopener noreferrer" class="contact-link linkedin-link">Search LinkedIn →</a>
+						{/if}
+					</dd>
+				{/if}
+				{#if lead.price_level != null}
+					<dt>Price Level</dt>
+					<dd class="price-level">{'$'.repeat(lead.price_level || 1)}</dd>
+				{/if}
+				{#if lead.last_review_date}
+					{@const reviewAge = Math.floor((Date.now() - new Date(lead.last_review_date).getTime()) / (1000 * 60 * 60 * 24 * 30))}
+					<dt>Last Review</dt>
+					<dd class:stale={reviewAge > 12}>
+						{new Date(lead.last_review_date).toLocaleDateString('en-CA', { year: 'numeric', month: 'short' })}
+						{#if reviewAge > 12}<span class="stale-tag">{reviewAge}mo ago</span>{/if}
+					</dd>
+				{/if}
+				{#if lead.owner_response_rate != null}
+					<dt>Owner Responds</dt>
+					<dd class:no={lead.owner_response_rate === 0}>
+						{lead.owner_response_rate === 0 ? 'Never' : `${Math.round(lead.owner_response_rate * 100)}% of reviews`}
+					</dd>
+				{/if}
+				{#if lead.social_activity_score != null}
+					<dt>Social Channels</dt>
+					<dd class:no={lead.social_activity_score === 0}>
+						{lead.social_activity_score}/6
+						{#if lead.social_activity_score === 0}<span class="stale-tag">none found</span>{/if}
+					</dd>
+				{/if}
+				{#if lead.opening_hours?.length}
+					<dt>Hours</dt>
+					<dd>
+						<details>
+							<summary>{lead.opening_hours[0]}</summary>
+							<ul class="hours-list">
+								{#each lead.opening_hours as line}
+									<li>{line}</li>
+								{/each}
+							</ul>
+						</details>
+					</dd>
+				{/if}
+			</dl>
+		</section>
+		{/if}
 
 		<!-- Web Health -->
 		<section class="card">
@@ -772,6 +847,16 @@
 		cursor: not-allowed;
 	}
 
+	.deep-btn {
+		background: transparent;
+		border: 1px solid var(--accent);
+		color: var(--accent);
+	}
+
+	.deep-btn:hover:not(:disabled) {
+		background: rgba(var(--accent-rgb, 139, 92, 246), 0.12);
+	}
+
 	.email-btn {
 		background: transparent;
 		border: 1px solid var(--border-subtle);
@@ -854,6 +939,45 @@
 		border: 1px solid rgba(251, 191, 36, 0.25);
 		border-radius: var(--radius-sm);
 		padding: 0.2rem 0.5rem;
+	}
+
+	.linkedin-link {
+		margin-left: 0.5rem;
+		font-size: 0.8rem;
+	}
+
+	.price-level {
+		letter-spacing: 0.05em;
+		color: #a3e635;
+	}
+
+	.stale {
+		color: #f87171;
+	}
+
+	.stale-tag {
+		margin-left: 0.4rem;
+		font-size: 0.75rem;
+		color: #f87171;
+		background: rgba(248, 113, 113, 0.1);
+		border: 1px solid rgba(248, 113, 113, 0.3);
+		border-radius: var(--radius-sm);
+		padding: 0.1rem 0.4rem;
+	}
+
+	.hours-list {
+		list-style: none;
+		padding: 0;
+		margin: 0.25rem 0 0;
+		font-size: 0.8rem;
+		color: var(--text-muted);
+		line-height: 1.6;
+	}
+
+	details > summary {
+		cursor: pointer;
+		font-size: 0.85rem;
+		color: var(--text-muted);
 	}
 
 	.modal-backdrop {

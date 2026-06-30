@@ -5,7 +5,43 @@ import { isSocialMediaUrl } from './utils.js';
 const PLACES_SEARCH_URL = 'https://maps.googleapis.com/maps/api/place/textsearch/json';
 const PLACES_NEARBY_URL = 'https://maps.googleapis.com/maps/api/place/nearbysearch/json';
 const PLACES_DETAIL_URL = 'https://maps.googleapis.com/maps/api/place/details/json';
-const DETAIL_FIELDS = 'name,formatted_address,formatted_phone_number,website,rating,user_ratings_total';
+const DETAIL_FIELDS = 'name,formatted_address,formatted_phone_number,website,rating,user_ratings_total,opening_hours,price_level,reviews';
+
+// Place types that are not serviceable small businesses
+const NON_BUSINESS_TYPES = new Set([
+	'tourist_attraction',
+	'natural_feature',
+	'park',
+	'campground',
+	'cemetery',
+	'amusement_park',
+	'zoo',
+	'aquarium',
+	'museum',
+	'stadium',
+	'airport',
+	'train_station',
+	'transit_station',
+	'bus_station',
+	'subway_station',
+	'light_rail_station',
+	'ferry_terminal',
+	'route',
+	'political',
+	'locality',
+	'sublocality',
+	'neighborhood',
+	'colloquial_area',
+	'country',
+	'administrative_area_level_1',
+	'administrative_area_level_2',
+	'administrative_area_level_3',
+	'premise',
+	'street_address',
+	'intersection',
+	'postal_code',
+	'landmark',
+]);
 
 export class Semaphore {
 	private queue: Array<() => void> = [];
@@ -75,6 +111,10 @@ async function upsertPlace(place: Record<string, unknown>, apiKey: string): Prom
 	const placeId = place.place_id as string | undefined;
 	if (!placeId) return false;
 
+	// Skip attractions, parks, transit stops, and other non-business place types
+	const types = (place.types as string[] | undefined) ?? [];
+	if (types.some((t) => NON_BUSINESS_TYPES.has(t))) return false;
+
 	const detailData = await getWithBackoff(PLACES_DETAIL_URL, {
 		place_id: placeId,
 		fields: DETAIL_FIELDS,
@@ -91,12 +131,51 @@ async function upsertPlace(place: Record<string, unknown>, apiKey: string): Prom
 		| Record<string, number>
 		| undefined;
 
+	// Extract opening hours
+	const openingHoursData = detail.opening_hours as Record<string, unknown> | undefined;
+	const openingHours = (openingHoursData?.weekday_text as string[] | undefined) ?? null;
+
+	// Extract price level
+	const priceLevel = (detail.price_level as number | undefined) ?? null;
+
+	// Extract review signals
+	const reviews = (detail.reviews as Array<Record<string, unknown>> | undefined) ?? [];
+	let lastReviewDate: string | null = null;
+	let ownerName: string | null = null;
+	let ownerResponseCount = 0;
+
+	for (const review of reviews) {
+		const time = review.time as number | undefined;
+		if (time) {
+			const reviewDate = new Date(time * 1000).toISOString();
+			if (!lastReviewDate || reviewDate > lastReviewDate) lastReviewDate = reviewDate;
+		}
+		const ownerReply = review.owner_response as Record<string, unknown> | undefined;
+		if (ownerReply) {
+			ownerResponseCount++;
+			// Try to extract owner name from the reply text signature (e.g. "— Jane, Owner")
+			if (!ownerName) {
+				const replyText = (ownerReply.text as string) ?? '';
+				const sigMatch = /[-–—]\s*([A-Z][a-z]+(?: [A-Z][a-z]+)?)\s*[,.]?\s*(?:owner|manager|proprietor)/i.exec(replyText);
+				if (sigMatch) ownerName = sigMatch[1];
+			}
+		}
+	}
+
+	const ownerResponseRate = reviews.length > 0 ? ownerResponseCount / reviews.length : null;
+
+	// Generate LinkedIn search URL if we have an owner name
+	const businessName = (detail.name as string) || (place.name as string) || '';
+	const address = (detail.formatted_address as string) || (place.formatted_address as string) || '';
+	const city = address.includes(',') ? address.split(',')[1].trim() : address;
+	const linkedinSearchUrl = ownerName
+		? `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(ownerName + ' ' + city)}`
+		: null;
+
 	const now = new Date().toISOString();
 	const lead: Record<string, unknown> = {
-		business_name:
-			(detail.name as string) || (place.name as string) || '',
-		address:
-			(detail.formatted_address as string) || (place.formatted_address as string) || '',
+		business_name: businessName,
+		address,
 		phone: (detail.formatted_phone_number as string) || '',
 		website_url: website,
 		google_place_id: placeId,
@@ -108,6 +187,12 @@ async function upsertPlace(place: Record<string, unknown>, apiKey: string): Prom
 		has_https: hasHttps,
 		latitude: location?.lat ?? null,
 		longitude: location?.lng ?? null,
+		opening_hours: openingHours,
+		price_level: priceLevel,
+		last_review_date: lastReviewDate,
+		owner_response_rate: ownerResponseRate,
+		owner_name: ownerName,
+		linkedin_search_url: linkedinSearchUrl,
 		status: 'cold',
 		last_updated: now
 	};

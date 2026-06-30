@@ -65,14 +65,37 @@ export function calculateScore(data: Record<string, unknown>): [number, string] 
 	}
 
 	// No social media presence at all — full digital absence
-	const hasSocial =
-		data.facebook_url ||
-		data.instagram_url ||
-		data.twitter_url ||
-		data.linkedin_url ||
-		data.tiktok_url ||
-		data.youtube_url;
-	if (!hasSocial) {
+	const socialActivityScore = data.social_activity_score as number | null | undefined;
+	if (socialActivityScore != null) {
+		if (socialActivityScore === 0) score += 10;
+	} else {
+		// Fallback: check individual URL columns when score not yet computed
+		const hasSocial =
+			data.facebook_url ||
+			data.instagram_url ||
+			data.twitter_url ||
+			data.linkedin_url ||
+			data.tiktok_url ||
+			data.youtube_url;
+		if (!hasSocial) score += 5;
+	}
+
+	// Owner ignoring reviews — sign of general online neglect
+	const ownerResponseRate = data.owner_response_rate as number | null | undefined;
+	if (ownerResponseRate === 0 && ((data.review_count as number) || 0) > 5) {
+		score += 5;
+	}
+
+	// Stale reviews — last review over 1 year ago
+	const lastReviewDate = data.last_review_date as string | null | undefined;
+	if (lastReviewDate) {
+		const ageMs = Date.now() - new Date(lastReviewDate).getTime();
+		if (ageMs > 365 * 24 * 60 * 60 * 1000) score += 5;
+	}
+
+	// Budget business with no web presence — strongest conversion signal
+	const priceLevel = data.price_level as number | null | undefined;
+	if (priceLevel === 1 && !data.has_website) {
 		score += 5;
 	}
 

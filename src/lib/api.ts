@@ -38,6 +38,13 @@ export interface Lead {
 	hidden: boolean;
 	created_at: string | null;
 	last_updated: string | null;
+	opening_hours: string[] | null;
+	price_level: number | null;
+	last_review_date: string | null;
+	owner_response_rate: number | null;
+	owner_name: string | null;
+	linkedin_search_url: string | null;
+	social_activity_score: number | null;
 }
 
 export interface Client {
@@ -136,8 +143,9 @@ export async function deleteLead(id: string): Promise<void> {
 	if (!res.ok && res.status !== 204) throw new Error(`Failed to delete lead: ${res.statusText}`);
 }
 
-export async function enrichLead(id: string): Promise<Lead> {
-	const res = await fetch(`${BASE}/leads/${id}/enrich`, {
+export async function enrichLead(id: string, { deep = false } = {}): Promise<Lead> {
+	const url = `${BASE}/leads/${id}/enrich${deep ? '?deep=true' : ''}`;
+	const res = await fetch(url, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' }
 	});
