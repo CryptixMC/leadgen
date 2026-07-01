@@ -14,7 +14,9 @@ const YELP_SEARCH_URL = 'https://api.yelp.com/v3/businesses/search';
 const DDG_SEARCH_URL = 'https://html.duckduckgo.com/html/';
 
 const EMAIL_RE = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
+const EMAIL_OBFUSCATED_RE = /([a-zA-Z0-9._%+-]+)\s*[\[(]?\s*at\s*[\])]?\s*([a-zA-Z0-9.-]+)\s*[\[(]?\s*dot\s*[\])]?\s*([a-zA-Z]{2,})\b/gi;
 const EMAIL_EXCLUDE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.pdf']);
+const PHONE_RE = /\(?\d{3}\)?[\s\-\.]\d{3}[\s\-\.]\d{4}/g;
 const COPYRIGHT_RE = /(?:©|&copy;|Copyright\s*(?:©|&copy;)?\s*)(\d{4})/gi;
 const CURRENT_YEAR = new Date().getFullYear();
 
@@ -227,6 +229,92 @@ export async function discoverWebsite(
 	return { websiteUrl: null, discoveredSocial };
 }
 
+// Recursively walk a JSON-LD object graph (schema.org LocalBusiness/Organization/ContactPoint
+// commonly nest email/telephone a level or two deep) looking for contact fields.
+function walkJsonLdContact(node: unknown, found: { email: string | null; phone: string | null }): void {
+	if (!node || typeof node !== 'object') return;
+	if (Array.isArray(node)) {
+		for (const item of node) walkJsonLdContact(item, found);
+		return;
+	}
+	const obj = node as Record<string, unknown>;
+	if (!found.email && typeof obj.email === 'string') {
+		const candidate = obj.email.replace(/^mailto:/i, '').trim();
+		EMAIL_RE.lastIndex = 0;
+		if (EMAIL_RE.test(candidate)) found.email = candidate;
+	}
+	if (!found.phone && typeof obj.telephone === 'string' && obj.telephone.replace(/\D/g, '').length >= 10) {
+		found.phone = obj.telephone.trim();
+	}
+	for (const value of Object.values(obj)) {
+		if (value && typeof value === 'object') walkJsonLdContact(value, found);
+	}
+}
+
+function extractJsonLdContact($: ReturnType<typeof cheerioLoad>): { email: string | null; phone: string | null } {
+	const found = { email: null as string | null, phone: null as string | null };
+	$('script[type="application/ld+json"]').each((_, el) => {
+		if (found.email && found.phone) return;
+		try {
+			const parsed = JSON.parse($(el).contents().text());
+			walkJsonLdContact(parsed, found);
+		} catch {
+			// malformed JSON-LD — ignore
+		}
+	});
+	return found;
+}
+
+function extractContactInfo($: ReturnType<typeof cheerioLoad>): { email: string | null; phone: string | null } {
+	let email: string | null = null;
+	let phone: string | null = null;
+
+	$('a[href]').each((_, el) => {
+		const href = $(el).attr('href') ?? '';
+		if (!email && href.startsWith('mailto:')) {
+			const candidate = href.slice(7).split('?')[0].trim();
+			EMAIL_RE.lastIndex = 0;
+			if (EMAIL_RE.test(candidate)) email = candidate;
+		}
+		if (!phone && href.startsWith('tel:')) {
+			const candidate = href.slice(4).trim();
+			if (candidate.replace(/\D/g, '').length >= 10) phone = candidate;
+		}
+	});
+
+	if (!email || !phone) {
+		const jsonLd = extractJsonLdContact($);
+		if (!email && jsonLd.email) email = jsonLd.email;
+		if (!phone && jsonLd.phone) phone = jsonLd.phone;
+	}
+
+	const text = $.text();
+	if (!email) {
+		EMAIL_RE.lastIndex = 0;
+		let match: RegExpExecArray | null;
+		while ((match = EMAIL_RE.exec(text)) !== null) {
+			const candidate = match[0];
+			if (!EMAIL_EXCLUDE_EXTS.has(candidate.toLowerCase().replace(/.*(\.[^.]+)$/, '$1'))) {
+				email = candidate;
+				break;
+			}
+		}
+	}
+	if (!email) {
+		// De-obfuscated fallback: "name [at] domain [dot] com" style anti-scraper text
+		EMAIL_OBFUSCATED_RE.lastIndex = 0;
+		const match = EMAIL_OBFUSCATED_RE.exec(text);
+		if (match) email = `${match[1]}@${match[2]}.${match[3]}`.toLowerCase();
+	}
+	if (!phone) {
+		PHONE_RE.lastIndex = 0;
+		const match = PHONE_RE.exec(text);
+		if (match) phone = match[0];
+	}
+
+	return { email, phone };
+}
+
 export async function scrapeWebsite(url: string, { subpages = true } = {}): Promise<Record<string, unknown>> {
 	const result: Record<string, unknown> = {
 		email: null,
@@ -243,32 +331,7 @@ export async function scrapeWebsite(url: string, { subpages = true } = {}): Prom
 		const html = await resp.text();
 		const $ = cheerioLoad(html);
 
-		// Email: mailto: links first, then regex scan
-		let foundEmail: string | null = null;
-		$('a[href]').each((_, el) => {
-			if (foundEmail) return;
-			const href = $(el).attr('href') ?? '';
-			if (href.startsWith('mailto:')) {
-				const candidate = href.slice(7).split('?')[0].trim();
-				if (EMAIL_RE.test(candidate)) {
-					foundEmail = candidate;
-					EMAIL_RE.lastIndex = 0;
-				}
-			}
-		});
-
-		if (!foundEmail) {
-			const text = $.text();
-			EMAIL_RE.lastIndex = 0;
-			let match: RegExpExecArray | null;
-			while ((match = EMAIL_RE.exec(text)) !== null) {
-				const candidate = match[0];
-				if (!EMAIL_EXCLUDE_EXTS.has(candidate.toLowerCase().replace(/.*(\.[^.]+)$/, '$1'))) {
-					foundEmail = candidate;
-					break;
-				}
-			}
-		}
+		let foundEmail = extractContactInfo($).email;
 
 		// Email fallback: check /contact and /about sub-pages (deep mode only)
 		if (!foundEmail && subpages) {
@@ -299,33 +362,7 @@ export async function scrapeWebsite(url: string, { subpages = true } = {}): Prom
 					if (!subResp.ok) return null;
 					const subHtml = await subResp.text();
 					const $sub = cheerioLoad(subHtml);
-
-					let subEmail: string | null = null;
-					$sub('a[href]').each((_, el) => {
-						if (subEmail) return;
-						const href = $sub(el).attr('href') ?? '';
-						if (href.startsWith('mailto:')) {
-							const candidate = href.slice(7).split('?')[0].trim();
-							if (EMAIL_RE.test(candidate)) {
-								subEmail = candidate;
-								EMAIL_RE.lastIndex = 0;
-							}
-						}
-					});
-
-					if (!subEmail) {
-						const subText = $sub.text();
-						EMAIL_RE.lastIndex = 0;
-						let subMatch: RegExpExecArray | null;
-						while ((subMatch = EMAIL_RE.exec(subText)) !== null) {
-							const candidate = subMatch[0];
-							if (!EMAIL_EXCLUDE_EXTS.has(candidate.toLowerCase().replace(/.*(\.[^.]+)$/, '$1'))) {
-								subEmail = candidate;
-								break;
-							}
-						}
-					}
-					return subEmail;
+					return extractContactInfo($sub).email;
 				})
 			);
 			for (const r of subResults) {
@@ -375,8 +412,6 @@ export async function scrapeWebsite(url: string, { subpages = true } = {}): Prom
 	return result;
 }
 
-const PHONE_RE = /\(?\d{3}\)?[\s\-\.]\d{3}[\s\-\.]\d{4}/g;
-
 async function searchSocialProfiles(
 	businessName: string,
 	address: string,
@@ -421,7 +456,7 @@ async function extractContactFromSocialBio(
 	if (platform === 'linkedin') return {};
 
 	try {
-		const resp = await fetch(url, {
+		const { response: resp } = await fetchSsrfSafe(url, {
 			headers: { 'User-Agent': BOT_UA },
 			signal: withTimeout(7_000)
 		});
@@ -471,6 +506,141 @@ async function extractContactFromSocialBio(
 	} catch {
 		return {};
 	}
+}
+
+const CONTACT_PAGE_KEYWORDS = [
+	'contact', 'about', 'home', 'team', 'staff', 'location', 'connect', 'reach', 'get-in-touch',
+	'support', 'help', 'careers', 'impressum', 'legal', 'privacy', 'imprint', 'faq',
+	'directions', 'office', 'branch'
+];
+
+// Overall soft deadline for findContact, well under Vercel's maxDuration: 60 on the
+// find-contact route. Individual fetches get a realistic timeout (matching scrapeWebsite's
+// patience); the deadline instead gates which *stages* get to run, so a slow site trades
+// away later stages rather than a too-short per-fetch timeout crippling every stage equally.
+const FIND_CONTACT_BUDGET_MS = 50_000;
+const FIND_CONTACT_MIN_STAGE_MS = 8_000;
+
+export async function findContact(lead: Record<string, unknown>): Promise<{ email: string | null; phone: string | null }> {
+	const deadline = Date.now() + FIND_CONTACT_BUDGET_MS;
+	const timeLeft = () => deadline - Date.now();
+
+	const needEmail = !lead.email;
+	const needPhone = !lead.phone;
+	let email: string | null = null;
+	let phone: string | null = null;
+	const satisfied = () => (!needEmail || email) && (!needPhone || phone);
+
+	const websiteUrl = lead.website_url as string | null;
+	if (websiteUrl && !satisfied() && timeLeft() > FIND_CONTACT_MIN_STAGE_MS) {
+		try {
+			const { response: resp } = await fetchSsrfSafe(websiteUrl, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(7_000) });
+			if (resp.ok) {
+				const $ = cheerioLoad(await resp.text());
+				const homeContact = extractContactInfo($);
+				if (needEmail && !email && homeContact.email) email = homeContact.email;
+				if (needPhone && !phone && homeContact.phone) phone = homeContact.phone;
+
+				if (!satisfied() && timeLeft() > FIND_CONTACT_MIN_STAGE_MS) {
+					const baseUrl = new URL(websiteUrl).origin;
+					const allLinkUrls: string[] = [];
+					const subPageUrls: string[] = [];
+
+					// Match on the link's URL *or* its visible label — nav items are
+					// sometimes mislabeled (e.g. an "About" menu entry repointed at a
+					// page whose slug is actually "home" after a site reorg).
+					$('a[href]').each((_, el) => {
+						const href = $(el).attr('href') ?? '';
+						let full: string;
+						try {
+							full = new URL(href, baseUrl).toString();
+						} catch {
+							return;
+						}
+						if (!full.startsWith(baseUrl)) return;
+						if (!allLinkUrls.includes(full)) allLinkUrls.push(full);
+
+						const lower = href.toLowerCase();
+						const label = $(el).text().trim().toLowerCase();
+						const isKeywordMatch = CONTACT_PAGE_KEYWORDS.some((kw) => lower.includes(kw) || label.includes(kw));
+						if (isKeywordMatch && !subPageUrls.includes(full)) subPageUrls.push(full);
+					});
+
+					const crawlBatched = async (urlsToCrawl: string[]) => {
+						for (
+							let i = 0;
+							i < urlsToCrawl.length && !satisfied() && timeLeft() > FIND_CONTACT_MIN_STAGE_MS;
+							i += 12
+						) {
+							const batch = urlsToCrawl.slice(i, i + 12);
+							const batchResults = await Promise.allSettled(
+								batch.map(async (subUrl) => {
+									const { response: subResp } = await fetchSsrfSafe(subUrl, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(7_000) });
+									if (!subResp.ok) return null;
+									return extractContactInfo(cheerioLoad(await subResp.text()));
+								})
+							);
+							for (const r of batchResults) {
+								if (r.status !== 'fulfilled' || !r.value) continue;
+								if (needEmail && !email && r.value.email) email = r.value.email;
+								if (needPhone && !phone && r.value.phone) phone = r.value.phone;
+							}
+						}
+					};
+
+					const targeted = subPageUrls.slice(0, 15);
+					await crawlBatched(targeted);
+
+					// Catch-all: if the targeted keyword/sitemap crawl still came up short,
+					// fall back to every other same-origin link found on the homepage —
+					// guarantees full one-hop coverage regardless of how pages are labeled.
+					if (!satisfied() && timeLeft() > FIND_CONTACT_MIN_STAGE_MS) {
+						const tried = new Set([websiteUrl, ...targeted]);
+						const remaining = allLinkUrls.filter((u) => !tried.has(u)).slice(0, 20);
+						await crawlBatched(remaining);
+					}
+				}
+			}
+		} catch {
+			// ignore
+		}
+	}
+
+	const biz = (lead.business_name as string) ?? '';
+	const addr = (lead.address as string) ?? '';
+
+	if (!satisfied() && timeLeft() > FIND_CONTACT_MIN_STAGE_MS) {
+		const socialFields = ['instagram_url', 'facebook_url', 'twitter_url', 'tiktok_url', 'youtube_url', 'linkedin_url'];
+		const socialEntries = socialFields
+			.map((f) => ({ field: f, url: lead[f] as string | null }))
+			.filter((e): e is { field: string; url: string } => typeof e.url === 'string');
+
+		const socialResults = await Promise.allSettled(
+			socialEntries.map(async (e) => {
+				const platform = getSocialPlatform(e.url);
+				if (!platform) return null;
+				return extractContactFromSocialBio(platform, e.url);
+			})
+		);
+		for (const r of socialResults) {
+			if (r.status !== 'fulfilled' || !r.value) continue;
+			if (needEmail && !email && r.value.email) email = r.value.email;
+			if (needPhone && !phone && r.value.phone) phone = r.value.phone;
+		}
+	}
+
+	if (!satisfied() && biz && timeLeft() > FIND_CONTACT_MIN_STAGE_MS) {
+		const newSocials = await searchSocialProfiles(biz, addr, lead);
+		await Promise.allSettled(
+			Object.entries(newSocials).map(async ([platform, url]) => {
+				const contact = await extractContactFromSocialBio(platform, url);
+				if (needEmail && !email && contact.email) email = contact.email;
+				if (needPhone && !phone && contact.phone) phone = contact.phone;
+			})
+		);
+	}
+
+	return { email, phone };
 }
 
 async function discoverWebsiteGoogle(

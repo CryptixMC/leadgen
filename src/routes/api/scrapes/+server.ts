@@ -1,8 +1,13 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import type { Config } from '@sveltejs/adapter-vercel';
 import { requireAuth } from '$lib/server/auth';
 import { runScrape, runScrapePolygon } from '$lib/server/scraper';
 import type { LatLng } from '$lib/geo';
+
+export const config: Config = {
+	maxDuration: 60
+};
 
 function isValidPolygon(polygon: unknown): polygon is LatLng[] {
 	return (

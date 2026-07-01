@@ -3,7 +3,16 @@ import type { RequestHandler } from './$types';
 import { db } from '$lib/server/db';
 import { requireAuth } from '$lib/server/auth';
 import { calculateScore } from '$lib/server/scoring';
-import { normalizeWebsiteUrl } from '$lib/server/utils';
+import { normalizeWebsiteUrl, normalizeSocialUrl } from '$lib/server/utils';
+
+const SOCIAL_URL_FIELDS: Record<string, string> = {
+	facebook_url: 'facebook',
+	instagram_url: 'instagram',
+	twitter_url: 'twitter',
+	linkedin_url: 'linkedin',
+	tiktok_url: 'tiktok',
+	youtube_url: 'youtube'
+};
 import { DEMO_LEADS } from '$lib/demo/data';
 
 export const GET: RequestHandler = async ({ locals, params }) => {
@@ -54,6 +63,18 @@ export const PATCH: RequestHandler = async ({ locals, params, request }) => {
 		updateData.website_url = websiteUrl;
 		updateData.has_website = Boolean(websiteUrl);
 		updateData.has_https = websiteUrl != null && websiteUrl.startsWith('https://');
+	}
+	if (payload.owner_name !== undefined) {
+		const ownerName = String(payload.owner_name).trim();
+		updateData.owner_name = ownerName || null;
+	}
+	for (const [field, platform] of Object.entries(SOCIAL_URL_FIELDS)) {
+		if (payload[field] === undefined) continue;
+		try {
+			updateData[field] = normalizeSocialUrl(payload[field], platform);
+		} catch (e) {
+			throw error(400, e instanceof Error ? e.message : `Invalid ${platform} URL`);
+		}
 	}
 	if (!Object.keys(updateData).length) throw error(400, 'No updatable fields provided');
 	updateData.last_updated = new Date().toISOString();

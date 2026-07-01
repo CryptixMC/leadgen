@@ -118,6 +118,13 @@ export async function updateLead(
 		phone?: string;
 		email?: string;
 		website_url?: string;
+		owner_name?: string;
+		facebook_url?: string;
+		instagram_url?: string;
+		twitter_url?: string;
+		linkedin_url?: string;
+		tiktok_url?: string;
+		youtube_url?: string;
 	}
 ): Promise<Lead> {
 	const res = await fetch(`${BASE}/leads/${id}`, {
@@ -173,6 +180,15 @@ export async function enrichLead(id: string, { deep = false } = {}): Promise<Lea
 		headers: { 'Content-Type': 'application/json' }
 	});
 	if (!res.ok) throw new Error(`Enrich failed: ${res.statusText}`);
+	return res.json();
+}
+
+export async function findContact(id: string): Promise<Lead> {
+	const res = await fetch(`${BASE}/leads/${id}/find-contact`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' }
+	});
+	if (!res.ok) throw new Error(`Find contact failed: ${res.statusText}`);
 	return res.json();
 }
 

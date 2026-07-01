@@ -94,6 +94,33 @@ export function normalizeWebsiteUrl(raw: string | null | undefined): string | nu
 	return parsed.href;
 }
 
+/**
+ * Validates a manually-entered social media URL for a specific platform field
+ * (e.g. rejects an Instagram link pasted into the Facebook field).
+ */
+export function normalizeSocialUrl(raw: string | null | undefined, platform: string): string | null {
+	const trimmed = (raw ?? '').trim();
+	if (!trimmed) return null;
+
+	const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+	let parsed: URL;
+	try {
+		parsed = new URL(withScheme);
+	} catch {
+		throw new Error(`${platform} URL is not valid`);
+	}
+
+	if (getSocialPlatform(parsed.href) !== platform) {
+		throw new Error(`That doesn't look like a ${platform} URL`);
+	}
+
+	if (isDisallowedHostLiteral(parsed.hostname)) {
+		throw new Error(`${platform} URL cannot point to a local or internal address`);
+	}
+
+	return parsed.href;
+}
+
 // --- SSRF protection -------------------------------------------------------
 // Used to stop server-side fetches (enrichment scraping, redirect resolution)
 // from being pointed at internal/private network targets via a lead's website URL.

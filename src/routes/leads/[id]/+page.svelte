@@ -2,7 +2,7 @@
 	import { untrack } from 'svelte';
 	import { enhance } from '$app/forms';
 	import type { PageData } from './$types';
-	import { updateLead, deleteLead, enrichLead, generateEmail, sendLeadEmail, type Lead } from '$lib/api';
+	import { updateLead, deleteLead, enrichLead, findContact, generateEmail, sendLeadEmail, type Lead } from '$lib/api';
 	import { EMAIL_TEMPLATES, fillTemplate, type EmailTemplate } from '$lib/emailTemplates';
 	import { goto } from '$app/navigation';
 
@@ -56,7 +56,14 @@
 		address: '',
 		phone: '',
 		email: '',
-		website_url: ''
+		website_url: '',
+		owner_name: '',
+		facebook_url: '',
+		instagram_url: '',
+		twitter_url: '',
+		linkedin_url: '',
+		tiktok_url: '',
+		youtube_url: ''
 	});
 	let editSaving = $state(false);
 	let editError = $state('');
@@ -67,7 +74,14 @@
 			address: lead.address ?? '',
 			phone: lead.phone ?? '',
 			email: lead.email ?? '',
-			website_url: lead.website_url ?? ''
+			website_url: lead.website_url ?? '',
+			owner_name: lead.owner_name ?? '',
+			facebook_url: lead.facebook_url ?? '',
+			instagram_url: lead.instagram_url ?? '',
+			twitter_url: lead.twitter_url ?? '',
+			linkedin_url: lead.linkedin_url ?? '',
+			tiktok_url: lead.tiktok_url ?? '',
+			youtube_url: lead.youtube_url ?? ''
 		};
 		editError = '';
 		editModalOpen = true;
@@ -83,7 +97,14 @@
 				address: editForm.address.trim(),
 				phone: editForm.phone.trim(),
 				email: editForm.email.trim(),
-				website_url: editForm.website_url.trim()
+				website_url: editForm.website_url.trim(),
+				owner_name: editForm.owner_name.trim(),
+				facebook_url: editForm.facebook_url.trim(),
+				instagram_url: editForm.instagram_url.trim(),
+				twitter_url: editForm.twitter_url.trim(),
+				linkedin_url: editForm.linkedin_url.trim(),
+				tiktok_url: editForm.tiktok_url.trim(),
+				youtube_url: editForm.youtube_url.trim()
 			});
 			notes = lead.notes ?? '';
 			editModalOpen = false;
@@ -101,6 +122,7 @@
 	}
 
 	let deepEnriching = $state(false);
+	let findingContact = $state(false);
 
 	async function handleEnrich() {
 		enriching = true;
@@ -126,6 +148,24 @@
 			enrichMsg = 'Deep scan failed.';
 		} finally {
 			deepEnriching = false;
+		}
+		setTimeout(() => (enrichMsg = ''), 3000);
+	}
+
+	async function handleFindContact() {
+		findingContact = true;
+		enrichMsg = '';
+		try {
+			const hadEmail = Boolean(lead.email);
+			const hadPhone = Boolean(lead.phone);
+			lead = await findContact(lead.id);
+			enrichMsg = (lead.email && !hadEmail) || (lead.phone && !hadPhone)
+				? 'Contact found!'
+				: 'No new contact info found.';
+		} catch {
+			enrichMsg = 'Contact search failed.';
+		} finally {
+			findingContact = false;
 		}
 		setTimeout(() => (enrichMsg = ''), 3000);
 	}
@@ -267,12 +307,17 @@
 		<button class="back-btn" onclick={() => goto('/')}>← Back</button>
 		<div class="back-actions">
 			{#if enrichMsg}<span class="save-msg">{enrichMsg}</span>{/if}
-			<button class="enrich-btn" onclick={handleEnrich} disabled={enriching || deepEnriching} title="Quick scan: Yelp, website, email, social links (~10s)">
+			<button class="enrich-btn" onclick={handleEnrich} disabled={enriching || deepEnriching || findingContact} title="Quick scan: Yelp, website, email, social links (~10s)">
 				{enriching ? 'Scanning…' : 'Quick Scan'}
 			</button>
-			<button class="enrich-btn deep-btn" onclick={handleDeepEnrich} disabled={enriching || deepEnriching} title="Deep scan: everything + PageSpeed score + screenshot (~60s)">
+			<button class="enrich-btn deep-btn" onclick={handleDeepEnrich} disabled={enriching || deepEnriching || findingContact} title="Deep scan: everything + PageSpeed score + screenshot (~60s)">
 				{deepEnriching ? 'Deep scanning…' : 'Deep Scan'}
 			</button>
+			{#if !lead.email || !lead.phone}
+				<button class="enrich-btn deep-btn" onclick={handleFindContact} disabled={enriching || deepEnriching || findingContact} title="Exhaustive search: sitemap crawl, structured data, de-obfuscation, social discovery, and web search for a missing email or phone (~45s)">
+					{findingContact ? 'Searching…' : 'Find Contact'}
+				</button>
+			{/if}
 			{#if lead.email}
 				<button class="email-btn" onclick={openEmailModal}>Send Email</button>
 			{/if}
@@ -629,6 +674,41 @@
 					<div class="form-row">
 						<label for="edit-website">Website URL</label>
 						<input id="edit-website" type="text" bind:value={editForm.website_url} placeholder="https://example.com" />
+					</div>
+
+					<div class="form-row">
+						<label for="edit-owner-name">Owner / Contact Name</label>
+						<input id="edit-owner-name" type="text" bind:value={editForm.owner_name} placeholder="Jane Doe" />
+					</div>
+
+					<div class="form-row">
+						<label for="edit-facebook">Facebook URL</label>
+						<input id="edit-facebook" type="text" bind:value={editForm.facebook_url} placeholder="https://facebook.com/yourbusiness" />
+					</div>
+
+					<div class="form-row">
+						<label for="edit-instagram">Instagram URL</label>
+						<input id="edit-instagram" type="text" bind:value={editForm.instagram_url} placeholder="https://instagram.com/yourbusiness" />
+					</div>
+
+					<div class="form-row">
+						<label for="edit-twitter">Twitter/X URL</label>
+						<input id="edit-twitter" type="text" bind:value={editForm.twitter_url} placeholder="https://x.com/yourbusiness" />
+					</div>
+
+					<div class="form-row">
+						<label for="edit-linkedin">LinkedIn URL</label>
+						<input id="edit-linkedin" type="text" bind:value={editForm.linkedin_url} placeholder="https://linkedin.com/company/yourbusiness" />
+					</div>
+
+					<div class="form-row">
+						<label for="edit-tiktok">TikTok URL</label>
+						<input id="edit-tiktok" type="text" bind:value={editForm.tiktok_url} placeholder="https://tiktok.com/@yourbusiness" />
+					</div>
+
+					<div class="form-row">
+						<label for="edit-youtube">YouTube URL</label>
+						<input id="edit-youtube" type="text" bind:value={editForm.youtube_url} placeholder="https://youtube.com/@yourbusiness" />
 					</div>
 				</div>
 

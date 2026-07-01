@@ -1,6 +1,11 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import type { Config } from '@sveltejs/adapter-vercel';
 import { db } from '$lib/server/db';
+
+export const config: Config = {
+	maxDuration: 60
+};
 import { requireAuth } from '$lib/server/auth';
 import { runEnrichment } from '$lib/server/enrichment';
 import { calculateScore } from '$lib/server/scoring';
