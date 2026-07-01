@@ -2,7 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { enhance } from '$app/forms';
 	import favicon from '$lib/assets/favicon.svg';
-	import { enterDemo } from '$lib/demo/state';
+	import { enterDemo, clearDemo } from '$lib/demo/state';
 	import type { ActionData } from './$types';
 
 	let { form }: { form: ActionData } = $props();
@@ -34,7 +34,8 @@
 			method="POST"
 			use:enhance={() => {
 				loading = true;
-				return async ({ update }) => {
+				return async ({ result, update }) => {
+					if (result.type === 'redirect') clearDemo();
 					await update();
 					loading = false;
 				};
