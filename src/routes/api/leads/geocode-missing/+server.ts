@@ -47,7 +47,11 @@ export const POST: RequestHandler = async ({ locals }) => {
 				const data = await resp.json();
 				const loc = data?.result?.geometry?.location;
 				if (loc?.lat != null && loc?.lng != null) {
-					await db.from('leads').update({ latitude: loc.lat, longitude: loc.lng }).eq('id', row.id);
+					const { error: updateErr } = await db
+						.from('leads')
+						.update({ latitude: loc.lat, longitude: loc.lng })
+						.eq('id', row.id);
+					if (updateErr) throw new Error(updateErr.message);
 					geocoded++;
 				} else {
 					failed++;

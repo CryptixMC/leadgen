@@ -229,10 +229,12 @@ async function upsertPlace(place: Record<string, unknown>, apiKey: string): Prom
 		.maybeSingle();
 	if (existing.data) {
 		if (existing.data.hidden) return false;
-		await db.from('leads').update(lead).eq('google_place_id', placeId);
+		const { error: updateErr } = await db.from('leads').update(lead).eq('google_place_id', placeId);
+		if (updateErr) throw new Error(`Failed to update lead: ${updateErr.message}`);
 	} else {
 		lead.created_at = now;
-		await db.from('leads').insert(lead);
+		const { error: insertErr } = await db.from('leads').insert(lead);
+		if (insertErr) throw new Error(`Failed to insert lead: ${insertErr.message}`);
 	}
 	return true;
 }
@@ -259,6 +261,9 @@ export async function runScrape(
 		await sem.acquire();
 		try {
 			return await upsertPlace(place, apiKey);
+		} catch (err) {
+			console.error('upsertPlace failed:', err instanceof Error ? err.message : err);
+			return false;
 		} finally {
 			sem.release();
 		}
