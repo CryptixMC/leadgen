@@ -360,24 +360,6 @@
 			<button class="select-unenriched-btn" onclick={selectNonEnriched}>
 				Select unenriched
 			</button>
-			<div class="sort-control">
-				<select bind:value={sortColumn} aria-label="Sort by">
-					<option value="lead_score">Score</option>
-					<option value="business_name">Business</option>
-					<option value="category">Category</option>
-					<option value="address">Address</option>
-					<option value="website_url">Website</option>
-					<option value="email">Email</option>
-					<option value="priority">Priority</option>
-					<option value="status">Status</option>
-				</select>
-				<button
-					class="sort-dir-btn"
-					onclick={() => (sortDir = sortDir === 'asc' ? 'desc' : 'asc')}
-					aria-label="Toggle sort direction"
-					title={sortDir === 'asc' ? 'Ascending' : 'Descending'}
-				>{sortDir === 'asc' ? '↑' : '↓'}</button>
-			</div>
 			<button class="new-lead-btn" onclick={openCreateModal}>+ New Lead</button>
 		</div>
 	</div>
@@ -496,6 +478,18 @@
 				{/if}
 			</tbody>
 		</table>
+	</div>
+
+	<!-- Mobile sort header (shown only on small screens, alongside the card list) -->
+	<div class="mobile-sort-header">
+		<button class="mobile-sort-th" onclick={() => toggleSort('business_name')}>Business{sortIndicator('business_name')}</button>
+		<button class="mobile-sort-th" onclick={() => toggleSort('category')}>Category{sortIndicator('category')}</button>
+		<button class="mobile-sort-th" onclick={() => toggleSort('address')}>Address{sortIndicator('address')}</button>
+		<button class="mobile-sort-th" onclick={() => toggleSort('website_url')}>Website{sortIndicator('website_url')}</button>
+		<button class="mobile-sort-th" onclick={() => toggleSort('email')}>Email{sortIndicator('email')}</button>
+		<button class="mobile-sort-th" onclick={() => toggleSort('lead_score')}>Score{sortIndicator('lead_score')}</button>
+		<button class="mobile-sort-th" onclick={() => toggleSort('priority')}>Priority{sortIndicator('priority')}</button>
+		<button class="mobile-sort-th" onclick={() => toggleSort('status')}>Status{sortIndicator('status')}</button>
 	</div>
 
 	<!-- Mobile card list (shown only on small screens) -->
@@ -711,29 +705,6 @@
 
 	.select-all-btn:hover,
 	.select-unenriched-btn:hover {
-		border-color: var(--accent-primary);
-		color: var(--text-primary);
-	}
-
-	.sort-control {
-		display: flex;
-		align-items: center;
-		gap: 0.35rem;
-	}
-
-	.sort-dir-btn {
-		background: transparent;
-		border: 1px solid var(--border-subtle);
-		color: var(--text-muted);
-		padding: 0.38rem 0.6rem;
-		border-radius: var(--radius-pill);
-		cursor: pointer;
-		font-family: var(--font-display);
-		font-size: 0.8rem;
-		transition: border-color var(--dur-fast), color var(--dur-fast);
-	}
-
-	.sort-dir-btn:hover {
 		border-color: var(--accent-primary);
 		color: var(--text-primary);
 	}
@@ -1397,6 +1368,38 @@
 		max-width: 400px;
 	}
 
+	/* Mobile sort header */
+	.mobile-sort-header {
+		display: none;
+		gap: 0.4rem;
+		overflow-x: auto;
+		padding-bottom: 0.5rem;
+		margin-bottom: 0.5rem;
+		border-bottom: 1px solid var(--border-grid);
+	}
+
+	.mobile-sort-th {
+		flex-shrink: 0;
+		background: transparent;
+		border: 1px solid var(--border-subtle);
+		color: var(--text-muted);
+		padding: 0.35rem 0.7rem;
+		border-radius: var(--radius-pill);
+		cursor: pointer;
+		font-family: var(--font-ui);
+		font-weight: 600;
+		font-size: 0.68rem;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		white-space: nowrap;
+		transition: border-color var(--dur-fast), color var(--dur-fast);
+	}
+
+	.mobile-sort-th:hover {
+		border-color: var(--accent-primary);
+		color: var(--text-primary);
+	}
+
 	/* Mobile card list */
 	.card-list {
 		display: none;
@@ -1553,17 +1556,12 @@
 			justify-content: center;
 		}
 
-		.right-controls .sort-control {
-			flex: 1;
-			display: flex;
-		}
-
-		.right-controls .sort-control select {
-			flex: 1;
-		}
-
 		.table-wrap {
 			display: none;
+		}
+
+		.mobile-sort-header {
+			display: flex;
 		}
 
 		.card-list {
