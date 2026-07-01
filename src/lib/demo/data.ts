@@ -12,6 +12,7 @@ export const DEMO_LEADS: Lead[] = [
 	{
 		id: 'a1b2c3d4-0001-4000-8000-aabbccddeef1',
 		business_name: 'Pembina Pho',
+		category: 'Restaurant',
 		address: '1842 Pembina Hwy, Winnipeg, MB',
 		phone: '(204) 555-0191',
 		website_url: null,
@@ -51,6 +52,7 @@ export const DEMO_LEADS: Lead[] = [
 	{
 		id: 'a1b2c3d4-0002-4000-8000-aabbccddeef2',
 		business_name: 'Prairie Bloom Florist',
+		category: 'Florist',
 		address: '620 Academy Rd, Winnipeg, MB',
 		phone: '(204) 555-0344',
 		website_url: 'https://prairieblooms.ca',
@@ -90,6 +92,7 @@ export const DEMO_LEADS: Lead[] = [
 	{
 		id: 'a1b2c3d4-0003-4000-8000-aabbccddeef3',
 		business_name: 'Osborne Tattoo Co',
+		category: 'Tattoo Shop',
 		address: '155 Osborne St, Winnipeg, MB',
 		phone: '(204) 555-0822',
 		website_url: null,
@@ -130,6 +133,7 @@ export const DEMO_LEADS: Lead[] = [
 	{
 		id: 'a1b2c3d4-0004-4000-8000-aabbccddeef4',
 		business_name: 'Forks Fitness Studio',
+		category: 'Gym',
 		address: '291 Main St, Winnipeg, MB',
 		phone: '(204) 555-0133',
 		website_url: 'https://forksfitness.ca',
@@ -169,6 +173,7 @@ export const DEMO_LEADS: Lead[] = [
 	{
 		id: 'a1b2c3d4-0005-4000-8000-aabbccddeef5',
 		business_name: 'Cathedral Bakery',
+		category: 'Bakery',
 		address: '510 Cathedral Ave, Winnipeg, MB',
 		phone: '(204) 555-0477',
 		website_url: null,
@@ -208,6 +213,7 @@ export const DEMO_LEADS: Lead[] = [
 	{
 		id: 'a1b2c3d4-0006-4000-8000-aabbccddeef6',
 		business_name: 'West End Auto Repair',
+		category: 'Car Repair',
 		address: '902 Ellice Ave, Winnipeg, MB',
 		phone: '(204) 555-0655',
 		website_url: 'https://www.skipthedishes.com/west-end-auto',
@@ -248,6 +254,7 @@ export const DEMO_LEADS: Lead[] = [
 	{
 		id: 'a1b2c3d4-0007-4000-8000-aabbccddeef7',
 		business_name: 'Sage & Salt Spa',
+		category: 'Spa',
 		address: '47 Lilac St, Winnipeg, MB',
 		phone: '(204) 555-0211',
 		website_url: 'https://sageandsalt.ca',
@@ -287,6 +294,7 @@ export const DEMO_LEADS: Lead[] = [
 	{
 		id: 'a1b2c3d4-0008-4000-8000-aabbccddeef8',
 		business_name: 'Corydon Cycle',
+		category: 'Bicycle Store',
 		address: '788 Corydon Ave, Winnipeg, MB',
 		phone: '(204) 555-0389',
 		website_url: null,
@@ -327,6 +335,7 @@ export const DEMO_LEADS: Lead[] = [
 	{
 		id: 'a1b2c3d4-0009-4000-8000-aabbccddeef9',
 		business_name: 'Fort Rouge Physiotherapy',
+		category: 'Physiotherapist',
 		address: '233 Nassau St N, Winnipeg, MB',
 		phone: '(204) 555-0544',
 		website_url: 'https://fortrougephysio.ca',
@@ -366,6 +375,7 @@ export const DEMO_LEADS: Lead[] = [
 	{
 		id: 'a1b2c3d4-0010-4000-8000-aabbccddee10',
 		business_name: 'Wolseley Coffee',
+		category: 'Cafe',
 		address: '91 Wolseley Ave, Winnipeg, MB',
 		phone: '(204) 555-0712',
 		website_url: null,
@@ -406,6 +416,7 @@ export const DEMO_LEADS: Lead[] = [
 	{
 		id: 'a1b2c3d4-0011-4000-8000-aabbccddee11',
 		business_name: 'Exchange Eats',
+		category: 'Restaurant',
 		address: '100 Arthur St, Winnipeg, MB',
 		phone: '(204) 555-0198',
 		website_url: 'https://exchangeeats.ca',
@@ -445,6 +456,7 @@ export const DEMO_LEADS: Lead[] = [
 	{
 		id: 'a1b2c3d4-0012-4000-8000-aabbccddee12',
 		business_name: 'Transcona Printing',
+		category: 'Print Shop',
 		address: '3121 Pembina Hwy, Winnipeg, MB',
 		phone: '(204) 555-0901',
 		website_url: 'https://transconaprint.ca',
