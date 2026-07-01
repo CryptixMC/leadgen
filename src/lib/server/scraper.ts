@@ -43,6 +43,25 @@ const NON_BUSINESS_TYPES = new Set([
 	'landmark',
 ]);
 
+// Generic Google Places types that appear on almost every place regardless of
+// business type — skipped when picking a per-lead category label.
+const GENERIC_PLACE_TYPES = new Set([
+	'point_of_interest',
+	'establishment',
+	'premise',
+	'subpremise',
+	'geocode',
+]);
+
+function deriveCategory(types: string[]): string | null {
+	const first = types.find((t) => !GENERIC_PLACE_TYPES.has(t));
+	if (!first) return null;
+	return first
+		.split('_')
+		.map((w) => w[0].toUpperCase() + w.slice(1))
+		.join(' ');
+}
+
 export class Semaphore {
 	private queue: Array<() => void> = [];
 	constructor(private permits: number) {}
@@ -179,6 +198,7 @@ async function upsertPlace(place: Record<string, unknown>, apiKey: string): Prom
 	const now = new Date().toISOString();
 	const lead: Record<string, unknown> = {
 		business_name: businessName,
+		category: deriveCategory(types),
 		address,
 		phone: (detail.formatted_phone_number as string) || '',
 		website_url: website,

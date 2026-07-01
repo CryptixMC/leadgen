@@ -8,8 +8,20 @@
 
 	let statusFilter = $state('');
 	let priorityFilter = $state('');
+	let categoryFilter = $state('');
 	let searchQuery = $state('');
-	let sortAsc = $state(false);
+
+	type SortColumn =
+		| 'business_name'
+		| 'category'
+		| 'address'
+		| 'website_url'
+		| 'email'
+		| 'lead_score'
+		| 'priority'
+		| 'status';
+	let sortColumn = $state<SortColumn>('lead_score');
+	let sortDir = $state<'asc' | 'desc'>('desc');
 	let selected = $state(new Set<string>());
 	let deleting = $state(false);
 	let hiding = $state(false);
@@ -70,11 +82,79 @@
 
 	const STATUSES = ['', 'cold', 'contacted', 'proposal', 'closed_won', 'closed_lost'];
 	const PRIORITIES = ['', 'high', 'medium', 'low'];
+	const PRIORITY_RANK: Record<string, number> = { high: 3, medium: 2, low: 1 };
+	const STATUS_RANK: Record<string, number> = {
+		cold: 0,
+		contacted: 1,
+		proposal: 2,
+		closed_won: 3,
+		closed_lost: 4
+	};
+
+	const CATEGORIES = $derived(
+		Array.from(
+			new Set((data.leads as Lead[]).map((l) => l.category).filter((c): c is string => Boolean(c)))
+		).sort()
+	);
+
+	function presenceThenAlpha(a: string | null, b: string | null): number {
+		const aHas = Boolean(a);
+		const bHas = Boolean(b);
+		if (aHas !== bHas) return aHas ? -1 : 1;
+		if (!aHas) return 0;
+		return a!.localeCompare(b!);
+	}
+
+	function compareLeads(a: Lead, b: Lead, column: SortColumn, dir: 'asc' | 'desc'): number {
+		let cmp: number;
+		switch (column) {
+			case 'business_name':
+				cmp = (a.business_name ?? '').localeCompare(b.business_name ?? '');
+				break;
+			case 'category':
+				cmp = (a.category ?? '').localeCompare(b.category ?? '');
+				break;
+			case 'address':
+				cmp = (a.address ?? '').localeCompare(b.address ?? '');
+				break;
+			case 'website_url':
+				cmp = presenceThenAlpha(a.website_url, b.website_url);
+				break;
+			case 'email':
+				cmp = presenceThenAlpha(a.email, b.email);
+				break;
+			case 'lead_score':
+				cmp = (a.lead_score ?? 0) - (b.lead_score ?? 0);
+				break;
+			case 'priority':
+				cmp = (PRIORITY_RANK[a.priority ?? ''] ?? 0) - (PRIORITY_RANK[b.priority ?? ''] ?? 0);
+				break;
+			case 'status':
+				cmp = (STATUS_RANK[a.status] ?? 0) - (STATUS_RANK[b.status] ?? 0);
+				break;
+		}
+		return dir === 'asc' ? cmp : -cmp;
+	}
+
+	function toggleSort(column: SortColumn) {
+		if (sortColumn === column) {
+			sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+		} else {
+			sortColumn = column;
+			sortDir = column === 'lead_score' ? 'desc' : 'asc';
+		}
+	}
+
+	function sortIndicator(column: SortColumn): string {
+		if (sortColumn !== column) return '';
+		return sortDir === 'asc' ? ' ↑' : ' ↓';
+	}
 
 	const filtered = $derived(
 		(data.leads as Lead[])
 			.filter((l) => (statusFilter ? l.status === statusFilter : true))
 			.filter((l) => (priorityFilter ? l.priority === priorityFilter : true))
+			.filter((l) => (categoryFilter ? l.category === categoryFilter : true))
 			.filter((l) => {
 				if (!searchQuery.trim()) return true;
 				const q = searchQuery.toLowerCase();
@@ -86,11 +166,7 @@
 					l.website_url?.toLowerCase().includes(q)
 				);
 			})
-			.sort((a, b) => {
-				const as = a.lead_score ?? 0;
-				const bs = b.lead_score ?? 0;
-				return sortAsc ? as - bs : bs - as;
-			})
+			.sort((a, b) => compareLeads(a, b, sortColumn, sortDir))
 	);
 
 	const allFilteredSelected = $derived(
@@ -249,6 +325,15 @@
 					{/each}
 				</select>
 			</label>
+			<label>
+				<span>Category</span>
+				<select bind:value={categoryFilter}>
+					<option value="">All</option>
+					{#each CATEGORIES as c}
+						<option value={c}>{c}</option>
+					{/each}
+				</select>
+			</label>
 		</div>
 		<div class="right-controls">
 			{#if selected.size > 0}
@@ -275,9 +360,24 @@
 			<button class="select-unenriched-btn" onclick={selectNonEnriched}>
 				Select unenriched
 			</button>
-			<button class="sort-btn" onclick={() => (sortAsc = !sortAsc)}>
-				Score {sortAsc ? '↑' : '↓'}
-			</button>
+			<div class="sort-control">
+				<select bind:value={sortColumn} aria-label="Sort by">
+					<option value="lead_score">Score</option>
+					<option value="business_name">Business</option>
+					<option value="category">Category</option>
+					<option value="address">Address</option>
+					<option value="website_url">Website</option>
+					<option value="email">Email</option>
+					<option value="priority">Priority</option>
+					<option value="status">Status</option>
+				</select>
+				<button
+					class="sort-dir-btn"
+					onclick={() => (sortDir = sortDir === 'asc' ? 'desc' : 'asc')}
+					aria-label="Toggle sort direction"
+					title={sortDir === 'asc' ? 'Ascending' : 'Descending'}
+				>{sortDir === 'asc' ? '↑' : '↓'}</button>
+			</div>
 			<button class="new-lead-btn" onclick={openCreateModal}>+ New Lead</button>
 		</div>
 	</div>
@@ -306,13 +406,14 @@
 							onclick={toggleSelectAll}
 						/>
 					</th>
-					<th>Business</th>
-					<th>Address</th>
-					<th>Website</th>
-					<th>Email</th>
-					<th class="num" onclick={() => (sortAsc = !sortAsc)}>Score</th>
-					<th>Priority</th>
-					<th>Status</th>
+					<th class="sortable" onclick={() => toggleSort('business_name')}>Business{sortIndicator('business_name')}</th>
+					<th class="sortable" onclick={() => toggleSort('category')}>Category{sortIndicator('category')}</th>
+					<th class="sortable" onclick={() => toggleSort('address')}>Address{sortIndicator('address')}</th>
+					<th class="sortable" onclick={() => toggleSort('website_url')}>Website{sortIndicator('website_url')}</th>
+					<th class="sortable" onclick={() => toggleSort('email')}>Email{sortIndicator('email')}</th>
+					<th class="sortable num" onclick={() => toggleSort('lead_score')}>Score{sortIndicator('lead_score')}</th>
+					<th class="sortable" onclick={() => toggleSort('priority')}>Priority{sortIndicator('priority')}</th>
+					<th class="sortable" onclick={() => toggleSort('status')}>Status{sortIndicator('status')}</th>
 					<th class="actions-col">Scan</th>
 				</tr>
 			</thead>
@@ -336,6 +437,7 @@
 								title="View on Google Maps"
 							>Maps</a>
 						</td>
+						<td class="category-cell">{lead.category ?? '—'}</td>
 						<td class="addr">{lead.address}</td>
 						<td>
 							{#if lead.website_url}
@@ -389,7 +491,7 @@
 				{/each}
 				{#if filtered.length === 0}
 					<tr>
-						<td colspan="9" class="empty">No leads match your filters.</td>
+						<td colspan="10" class="empty">No leads match your filters.</td>
 					</tr>
 				{/if}
 			</tbody>
@@ -415,6 +517,9 @@
 						<span class="card-name">{lead.business_name}</span>
 						<span class="card-score" style="color: {lead.lead_score !== null && lead.lead_score >= 60 ? 'var(--accent-highlight)' : lead.lead_score !== null && lead.lead_score >= 30 ? '#818cf8' : 'var(--text-muted)'}">{lead.lead_score ?? '—'}</span>
 					</div>
+					{#if lead.category}
+						<div class="card-category">{lead.category}</div>
+					{/if}
 					<div class="card-badges">
 						<span class={priorityClass(lead.priority)}>{lead.priority ?? '—'}</span>
 						<span class={statusClass(lead.status)}>{lead.status}</span>
@@ -610,11 +715,17 @@
 		color: var(--text-primary);
 	}
 
-	.sort-btn {
+	.sort-control {
+		display: flex;
+		align-items: center;
+		gap: 0.35rem;
+	}
+
+	.sort-dir-btn {
 		background: transparent;
 		border: 1px solid var(--border-subtle);
 		color: var(--text-muted);
-		padding: 0.38rem 0.85rem;
+		padding: 0.38rem 0.6rem;
 		border-radius: var(--radius-pill);
 		cursor: pointer;
 		font-family: var(--font-display);
@@ -622,7 +733,7 @@
 		transition: border-color var(--dur-fast), color var(--dur-fast);
 	}
 
-	.sort-btn:hover {
+	.sort-dir-btn:hover {
 		border-color: var(--accent-primary);
 		color: var(--text-primary);
 	}
@@ -788,10 +899,14 @@
 
 	thead th.num {
 		text-align: right;
-		cursor: pointer;
 	}
 
-	thead th.num:hover {
+	thead th.sortable {
+		cursor: pointer;
+		user-select: none;
+	}
+
+	thead th.sortable:hover {
 		color: var(--accent-primary);
 	}
 
@@ -844,6 +959,11 @@
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
+	}
+
+	.category-cell {
+		color: var(--text-muted);
+		white-space: nowrap;
 	}
 
 	.maps-link {
@@ -1346,6 +1466,13 @@
 		flex-shrink: 0;
 	}
 
+	.card-category {
+		font-size: 0.72rem;
+		color: var(--text-muted);
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+
 	.card-badges {
 		display: flex;
 		align-items: center;
@@ -1407,7 +1534,8 @@
 		}
 
 		.filters label {
-			flex: 1;
+			flex: 1 1 calc(50% - 0.375rem);
+			min-width: 110px;
 		}
 
 		.filters select {
@@ -1423,6 +1551,15 @@
 			flex: 1;
 			min-height: 44px;
 			justify-content: center;
+		}
+
+		.right-controls .sort-control {
+			flex: 1;
+			display: flex;
+		}
+
+		.right-controls .sort-control select {
+			flex: 1;
 		}
 
 		.table-wrap {
