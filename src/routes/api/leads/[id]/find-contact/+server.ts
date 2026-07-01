@@ -1,9 +1,14 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import type { Config } from '@sveltejs/adapter-vercel';
 import { db } from '$lib/server/db';
 import { requireAuth } from '$lib/server/auth';
 import { findContact } from '$lib/server/enrichment';
 import { calculateScore } from '$lib/server/scoring';
+
+export const config: Config = {
+	maxDuration: 60
+};
 
 export const POST: RequestHandler = async ({ locals, params }) => {
 	if (locals.demo) return json({ ok: true });
@@ -16,7 +21,13 @@ export const POST: RequestHandler = async ({ locals, params }) => {
 		.single();
 	if (err || !lead) throw error(404, 'Lead not found');
 
-	const contact = await findContact(lead as Record<string, unknown>);
+	let contact: { email: string | null; phone: string | null };
+	try {
+		contact = await findContact(lead as Record<string, unknown>);
+	} catch (e) {
+		console.error('findContact failed:', e);
+		throw error(500, 'Find contact timed out or failed');
+	}
 
 	const updates: Record<string, unknown> = {};
 	if (contact.email && !lead.email) updates.email = contact.email;

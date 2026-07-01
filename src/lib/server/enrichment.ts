@@ -514,125 +514,6 @@ const CONTACT_PAGE_KEYWORDS = [
 	'directions', 'office', 'branch'
 ];
 
-// Common sitemap locations across plain sites, Yoast/RankMath-style WordPress SEO
-// plugins, and WordPress core's built-in sitemap (since 5.5) — tried in order.
-const SITEMAP_CANDIDATE_PATHS = ['/sitemap.xml', '/sitemap_index.xml', '/wp-sitemap.xml'];
-
-// Crawl sitemap.xml (following one level of sitemap-index nesting, or robots.txt's
-// Sitemap: directive as a fallback) to surface pages that aren't linked from the nav/footer.
-async function discoverSitemapUrls(baseUrl: string): Promise<string[]> {
-	const urls: string[] = [];
-
-	async function collectFromXml(xmlUrl: string, depth: number): Promise<void> {
-		if (depth > 1 || urls.length >= 200) return;
-		try {
-			const { response: resp } = await fetchSsrfSafe(xmlUrl, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(8_000) });
-			if (!resp.ok) return;
-			const xml = await resp.text();
-			const $ = cheerioLoad(xml, { xmlMode: true });
-
-			const childSitemaps = $('sitemap > loc').map((_, el) => $(el).text().trim()).get();
-			if (childSitemaps.length) {
-				for (const child of childSitemaps.slice(0, 3)) {
-					await collectFromXml(child, depth + 1);
-				}
-				return;
-			}
-
-			$('url > loc').each((_, el) => {
-				if (urls.length >= 200) return;
-				const loc = $(el).text().trim();
-				if (loc.startsWith(baseUrl) && !urls.includes(loc)) urls.push(loc);
-			});
-		} catch {
-			// ignore
-		}
-	}
-
-	for (const path of SITEMAP_CANDIDATE_PATHS) {
-		if (urls.length) break;
-		await collectFromXml(`${baseUrl}${path}`, 0);
-	}
-
-	if (!urls.length) {
-		try {
-			const { response: robotsResp } = await fetchSsrfSafe(`${baseUrl}/robots.txt`, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(5_000) });
-			if (robotsResp.ok) {
-				const robotsTxt = await robotsResp.text();
-				const sitemapLines = robotsTxt.split('\n').filter((l) => /^sitemap:/i.test(l.trim()));
-				for (const line of sitemapLines.slice(0, 3)) {
-					const sitemapUrl = line.split(':').slice(1).join(':').trim();
-					if (sitemapUrl) await collectFromXml(sitemapUrl, 0);
-				}
-			}
-		} catch {
-			// ignore
-		}
-	}
-
-	return urls;
-}
-
-// Last resort: search the open web for the business and scan the top non-directory,
-// non-social results for a mention of contact info (citations, press, directory profiles).
-async function searchContactMentions(
-	businessName: string,
-	address: string
-): Promise<{ email: string | null; phone: string | null }> {
-	const city = address.includes(',') ? address.split(',')[1].trim() : address;
-	const query = `"${businessName}" "${city}" contact email phone`;
-	const found: { email: string | null; phone: string | null } = { email: null, phone: null };
-
-	try {
-		const resp = await fetch(DDG_SEARCH_URL, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': BOT_UA },
-			body: new URLSearchParams({ q: query, b: '' }),
-			signal: withTimeout(8_000)
-		});
-		if (!resp.ok) return found;
-
-		const html = await resp.text();
-		const $ = cheerioLoad(html);
-
-		const candidateUrls: string[] = [];
-		for (const el of $('a.result__url, a.result__a').toArray()) {
-			let href = $(el).attr('href') ?? '';
-			if (!href || href.startsWith('//duckduckgo')) continue;
-			if (!href.startsWith('http')) href = 'https://' + href.replace(/^\/+/, '');
-			if (isSocialMediaUrl(href)) continue;
-
-			let domain: string;
-			try {
-				domain = new URL(href).hostname.toLowerCase().replace(/^www\./, '');
-			} catch {
-				continue;
-			}
-			if ([...DIRECTORY_DOMAINS].some((d) => domain === d || domain.endsWith('.' + d))) continue;
-
-			if (!candidateUrls.includes(href)) candidateUrls.push(href);
-			if (candidateUrls.length >= 3) break;
-		}
-
-		const results = await Promise.allSettled(
-			candidateUrls.map(async (url) => {
-				const { response: pageResp } = await fetchSsrfSafe(url, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(7_000) });
-				if (!pageResp.ok) return null;
-				return extractContactInfo(cheerioLoad(await pageResp.text()));
-			})
-		);
-		for (const r of results) {
-			if (r.status !== 'fulfilled' || !r.value) continue;
-			if (!found.email && r.value.email) found.email = r.value.email;
-			if (!found.phone && r.value.phone) found.phone = r.value.phone;
-			if (found.email && found.phone) break;
-		}
-	} catch {
-		// ignore
-	}
-	return found;
-}
-
 export async function findContact(lead: Record<string, unknown>): Promise<{ email: string | null; phone: string | null }> {
 	const needEmail = !lead.email;
 	const needPhone = !lead.phone;
@@ -643,7 +524,7 @@ export async function findContact(lead: Record<string, unknown>): Promise<{ emai
 	const websiteUrl = lead.website_url as string | null;
 	if (websiteUrl && !satisfied()) {
 		try {
-			const { response: resp } = await fetchSsrfSafe(websiteUrl, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(7_000) });
+			const { response: resp } = await fetchSsrfSafe(websiteUrl, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(4_000) });
 			if (resp.ok) {
 				const $ = cheerioLoad(await resp.text());
 				const homeContact = extractContactInfo($);
@@ -675,18 +556,12 @@ export async function findContact(lead: Record<string, unknown>): Promise<{ emai
 						if (isKeywordMatch && !subPageUrls.includes(full)) subPageUrls.push(full);
 					});
 
-					const sitemapUrls = await discoverSitemapUrls(baseUrl);
-					for (const url of sitemapUrls) {
-						if (subPageUrls.length >= 15) break;
-						if (!subPageUrls.includes(url)) subPageUrls.push(url);
-					}
-
 					const crawlBatched = async (urlsToCrawl: string[]) => {
 						for (let i = 0; i < urlsToCrawl.length && !satisfied(); i += 8) {
 							const batch = urlsToCrawl.slice(i, i + 8);
 							const batchResults = await Promise.allSettled(
 								batch.map(async (subUrl) => {
-									const { response: subResp } = await fetchSsrfSafe(subUrl, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(8_000) });
+									const { response: subResp } = await fetchSsrfSafe(subUrl, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(4_000) });
 									if (!subResp.ok) return null;
 									return extractContactInfo(cheerioLoad(await subResp.text()));
 								})
@@ -721,34 +596,34 @@ export async function findContact(lead: Record<string, unknown>): Promise<{ emai
 	const addr = (lead.address as string) ?? '';
 
 	if (!satisfied()) {
-		const socialOrder = ['instagram_url', 'facebook_url', 'twitter_url', 'tiktok_url', 'youtube_url', 'linkedin_url'];
-		for (const field of socialOrder) {
-			if (satisfied()) break;
-			const profileUrl = lead[field] as string | null;
-			if (!profileUrl) continue;
-			const platform = getSocialPlatform(profileUrl);
-			if (!platform) continue;
+		const socialFields = ['instagram_url', 'facebook_url', 'twitter_url', 'tiktok_url', 'youtube_url', 'linkedin_url'];
+		const socialEntries = socialFields
+			.map((f) => ({ field: f, url: lead[f] as string | null }))
+			.filter((e): e is { field: string; url: string } => typeof e.url === 'string');
 
-			const contact = await extractContactFromSocialBio(platform, profileUrl);
-			if (needEmail && !email && contact.email) email = contact.email;
-			if (needPhone && !phone && contact.phone) phone = contact.phone;
+		const socialResults = await Promise.allSettled(
+			socialEntries.map(async (e) => {
+				const platform = getSocialPlatform(e.url);
+				if (!platform) return null;
+				return extractContactFromSocialBio(platform, e.url);
+			})
+		);
+		for (const r of socialResults) {
+			if (r.status !== 'fulfilled' || !r.value) continue;
+			if (needEmail && !email && r.value.email) email = r.value.email;
+			if (needPhone && !phone && r.value.phone) phone = r.value.phone;
 		}
 	}
 
 	if (!satisfied() && biz) {
 		const newSocials = await searchSocialProfiles(biz, addr, lead);
-		for (const [platform, url] of Object.entries(newSocials)) {
-			if (satisfied()) break;
-			const contact = await extractContactFromSocialBio(platform, url);
-			if (needEmail && !email && contact.email) email = contact.email;
-			if (needPhone && !phone && contact.phone) phone = contact.phone;
-		}
-	}
-
-	if (!satisfied() && biz) {
-		const mentions = await searchContactMentions(biz, addr);
-		if (needEmail && !email && mentions.email) email = mentions.email;
-		if (needPhone && !phone && mentions.phone) phone = mentions.phone;
+		await Promise.allSettled(
+			Object.entries(newSocials).map(async ([platform, url]) => {
+				const contact = await extractContactFromSocialBio(platform, url);
+				if (needEmail && !email && contact.email) email = contact.email;
+				if (needPhone && !phone && contact.phone) phone = contact.phone;
+			})
+		);
 	}
 
 	return { email, phone };
