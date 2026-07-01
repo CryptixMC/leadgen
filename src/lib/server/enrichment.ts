@@ -456,7 +456,7 @@ async function extractContactFromSocialBio(
 	if (platform === 'linkedin') return {};
 
 	try {
-		const resp = await fetch(url, {
+		const { response: resp } = await fetchSsrfSafe(url, {
 			headers: { 'User-Agent': BOT_UA },
 			signal: withTimeout(7_000)
 		});
@@ -526,7 +526,7 @@ async function discoverSitemapUrls(baseUrl: string): Promise<string[]> {
 	async function collectFromXml(xmlUrl: string, depth: number): Promise<void> {
 		if (depth > 1 || urls.length >= 200) return;
 		try {
-			const resp = await fetch(xmlUrl, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(8_000) });
+			const { response: resp } = await fetchSsrfSafe(xmlUrl, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(8_000) });
 			if (!resp.ok) return;
 			const xml = await resp.text();
 			const $ = cheerioLoad(xml, { xmlMode: true });
@@ -556,7 +556,7 @@ async function discoverSitemapUrls(baseUrl: string): Promise<string[]> {
 
 	if (!urls.length) {
 		try {
-			const robotsResp = await fetch(`${baseUrl}/robots.txt`, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(5_000) });
+			const { response: robotsResp } = await fetchSsrfSafe(`${baseUrl}/robots.txt`, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(5_000) });
 			if (robotsResp.ok) {
 				const robotsTxt = await robotsResp.text();
 				const sitemapLines = robotsTxt.split('\n').filter((l) => /^sitemap:/i.test(l.trim()));
@@ -616,7 +616,7 @@ async function searchContactMentions(
 
 		const results = await Promise.allSettled(
 			candidateUrls.map(async (url) => {
-				const pageResp = await fetch(url, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(7_000) });
+				const { response: pageResp } = await fetchSsrfSafe(url, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(7_000) });
 				if (!pageResp.ok) return null;
 				return extractContactInfo(cheerioLoad(await pageResp.text()));
 			})
@@ -643,7 +643,7 @@ export async function findContact(lead: Record<string, unknown>): Promise<{ emai
 	const websiteUrl = lead.website_url as string | null;
 	if (websiteUrl && !satisfied()) {
 		try {
-			const resp = await fetch(websiteUrl, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(7_000) });
+			const { response: resp } = await fetchSsrfSafe(websiteUrl, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(7_000) });
 			if (resp.ok) {
 				const $ = cheerioLoad(await resp.text());
 				const homeContact = extractContactInfo($);
@@ -686,7 +686,7 @@ export async function findContact(lead: Record<string, unknown>): Promise<{ emai
 							const batch = urlsToCrawl.slice(i, i + 8);
 							const batchResults = await Promise.allSettled(
 								batch.map(async (subUrl) => {
-									const subResp = await fetch(subUrl, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(8_000) });
+									const { response: subResp } = await fetchSsrfSafe(subUrl, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(8_000) });
 									if (!subResp.ok) return null;
 									return extractContactInfo(cheerioLoad(await subResp.text()));
 								})
