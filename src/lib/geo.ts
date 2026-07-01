@@ -5,6 +5,9 @@ const EARTH_RADIUS_M = 6371000;
 /** Default Nearby Search circle radius used to tile a drawn polygon into a covering grid. */
 export const DEFAULT_CELL_RADIUS_M = 400;
 
+/** Max grid cells a polygon scrape will tile into, to bound Places API cost. */
+export const MAX_GRID_CELLS = 60;
+
 /** Ray-casting point-in-polygon test. `polygon` is a ring of [lat, lng] pairs. */
 export function pointInPolygon(lat: number, lng: number, polygon: LatLng[]): boolean {
 	let inside = false;

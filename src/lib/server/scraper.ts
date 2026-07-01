@@ -1,7 +1,13 @@
 import { GOOGLE_PLACES_API_KEY } from '$env/static/private';
 import { db } from './db.js';
 import { isSocialMediaUrl } from './utils.js';
-import { generateCoveringGrid, pointInPolygon, DEFAULT_CELL_RADIUS_M, type LatLng } from '$lib/geo';
+import {
+	generateCoveringGrid,
+	pointInPolygon,
+	DEFAULT_CELL_RADIUS_M,
+	MAX_GRID_CELLS,
+	type LatLng
+} from '$lib/geo';
 
 const PLACES_SEARCH_URL = 'https://maps.googleapis.com/maps/api/place/textsearch/json';
 const PLACES_NEARBY_URL = 'https://maps.googleapis.com/maps/api/place/nearbysearch/json';
@@ -368,7 +374,6 @@ export async function runScrape(
 }
 
 const GRID_CELL_RADIUS_M = DEFAULT_CELL_RADIUS_M;
-const MAX_GRID_CELLS = 60;
 const MAX_PAGES_PER_CELL = 2;
 
 /**
@@ -488,4 +493,22 @@ export async function runScrapePolygon(
 		city: 'Custom drawn area',
 		pages_fetched: pagesFetched
 	};
+}
+
+/** Geocodes free-text (address/neighborhood/city) to a point via Places Text Search. */
+export async function geocodeLocation(query: string): Promise<{ lat: number; lng: number } | null> {
+	const apiKey = GOOGLE_PLACES_API_KEY;
+	if (!apiKey) throw new Error('GOOGLE_PLACES_API_KEY not configured');
+
+	const data = await getWithBackoff(PLACES_SEARCH_URL, { query, key: apiKey });
+	const status = data.status as string;
+	if (status !== 'OK' && status !== 'ZERO_RESULTS') {
+		throw new Error(`Places API error: ${status}`);
+	}
+	const places = (data.results as Array<Record<string, unknown>>) ?? [];
+	if (!places.length) return null;
+	const loc = (places[0].geometry as Record<string, unknown>)?.location as
+		| Record<string, number>
+		| undefined;
+	return loc ? { lat: loc.lat, lng: loc.lng } : null;
 }

@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { onDestroy, tick } from 'svelte';
-	import { triggerScrape, rescoreLeads } from '$lib/api';
-	import { generateCoveringGrid, DEFAULT_CELL_RADIUS_M, type LatLng } from '$lib/geo';
+	import { triggerScrape, rescoreLeads, geocodeLocation } from '$lib/api';
+	import { generateCoveringGrid, polygonBounds, haversineKm, DEFAULT_CELL_RADIUS_M, MAX_GRID_CELLS, type LatLng } from '$lib/geo';
+
+	const JUMP_ZOOM = 16;
 
 	let allBusinesses = $state(false);
 	let category = $state('');
@@ -25,9 +27,22 @@
 	let drawnItemsLayer: any = null;
 	let drawControl: any = null;
 
+	let locationQuery = $state('');
+	let locating = $state(false);
+	let locationError = $state('');
+
 	const cellEstimate = $derived(
 		polygon && polygon.length >= 3 ? generateCoveringGrid(polygon, DEFAULT_CELL_RADIUS_M).length : 0
 	);
+	const areaTooLarge = $derived(cellEstimate > MAX_GRID_CELLS);
+	const areaSize = $derived.by(() => {
+		if (!polygon || polygon.length < 3) return null;
+		const { minLat, maxLat, minLng, maxLng } = polygonBounds(polygon);
+		const midLat = (minLat + maxLat) / 2;
+		const widthM = Math.round(haversineKm(midLat, minLng, midLat, maxLng) * 1000);
+		const heightM = Math.round(haversineKm(minLat, (minLng + maxLng) / 2, maxLat, (minLng + maxLng) / 2) * 1000);
+		return { widthM, heightM };
+	});
 
 	async function setMode(newMode: 'text' | 'polygon') {
 		mode = newMode;
@@ -74,6 +89,42 @@
 		polygon = null;
 	}
 
+	async function handleLocationSearch(e: Event) {
+		e.preventDefault();
+		if (!locationQuery.trim() || !mapInstance) return;
+		locating = true;
+		locationError = '';
+		try {
+			const loc = await geocodeLocation(locationQuery.trim());
+			if (!loc) {
+				locationError = 'Location not found — try a more specific address or neighborhood.';
+				return;
+			}
+			mapInstance.setView([loc.lat, loc.lng], JUMP_ZOOM);
+		} catch (err) {
+			locationError = err instanceof Error ? err.message : 'Location search failed';
+		} finally {
+			locating = false;
+		}
+	}
+
+	function handleUseMyLocation() {
+		if (!mapInstance || !navigator.geolocation) return;
+		locating = true;
+		locationError = '';
+		navigator.geolocation.getCurrentPosition(
+			(pos) => {
+				mapInstance.setView([pos.coords.latitude, pos.coords.longitude], JUMP_ZOOM);
+				locating = false;
+			},
+			() => {
+				locationError = 'Could not get your location — check browser permissions.';
+				locating = false;
+			},
+			{ timeout: 10000 }
+		);
+	}
+
 	onDestroy(() => mapInstance?.remove());
 
 	async function handleRescore() {
@@ -92,7 +143,7 @@
 	async function handleSubmit(e: Event) {
 		e.preventDefault();
 		if (!allBusinesses && !category.trim()) return;
-		if (mode === 'polygon' && (!polygon || polygon.length < 3)) return;
+		if (mode === 'polygon' && (!polygon || polygon.length < 3 || areaTooLarge)) return;
 
 		loading = true;
 		error = '';
@@ -192,16 +243,40 @@
 			</div>
 		{:else}
 			<div class="field">
-				<p class="field-hint">Draw a polygon or rectangle around the block(s) you want to canvass. Only businesses inside the shape are pulled in.</p>
+				<p class="field-hint">Find your target area first, then draw a polygon or rectangle around the block(s) you want to canvass. Only businesses inside the shape are pulled in.</p>
+				<div class="location-search">
+					<input
+						type="text"
+						bind:value={locationQuery}
+						placeholder="Search an address or neighborhood…"
+						disabled={loading || locating}
+						onkeydown={(e) => { if (e.key === 'Enter') handleLocationSearch(e); }}
+					/>
+					<button type="button" class="location-btn" onclick={handleLocationSearch} disabled={loading || locating || !locationQuery.trim()}>
+						{locating ? '…' : 'Go'}
+					</button>
+					<button type="button" class="location-btn" onclick={handleUseMyLocation} disabled={loading || locating} title="Use my location">
+						📍
+					</button>
+				</div>
+				{#if locationError}
+					<p class="field-hint error-hint">{locationError}</p>
+				{/if}
 				<div bind:this={mapContainer} class="draw-map"></div>
 				<div class="polygon-status">
 					{#if polygon}
-						<span>Area selected — ~{cellEstimate} search cell{cellEstimate === 1 ? '' : 's'}</span>
+						<span>
+							Area selected — ~{cellEstimate} search cell{cellEstimate === 1 ? '' : 's'}
+							{#if areaSize}· ≈{areaSize.widthM}m × {areaSize.heightM}m{/if}
+						</span>
 						<button type="button" class="clear-polygon-btn" onclick={clearPolygon} disabled={loading}>Clear area</button>
 					{:else}
 						<span>No area drawn yet.</span>
 					{/if}
 				</div>
+				{#if areaTooLarge}
+					<p class="field-hint error-hint">Area too large (~{cellEstimate} search cells, max {MAX_GRID_CELLS}) — draw a smaller area or clear and try again.</p>
+				{/if}
 			</div>
 		{/if}
 
@@ -221,7 +296,7 @@
 		<button
 			type="submit"
 			class="submit-btn"
-			disabled={loading || (!allBusinesses && !category.trim()) || (mode === 'polygon' && (!polygon || polygon.length < 3))}
+			disabled={loading || (!allBusinesses && !category.trim()) || (mode === 'polygon' && (!polygon || polygon.length < 3 || areaTooLarge))}
 		>
 			{loading ? 'Scraping…' : 'Run Scrape'}
 		</button>
@@ -247,6 +322,9 @@
 			<p class="result-detail">
 				Category: <strong>{result.category}</strong> · City: <strong>{result.city}</strong> · Pages fetched: <strong>{result.pages_fetched}</strong>
 			</p>
+			{#if result.upserted === 0}
+				<p class="result-detail">No new results — try a different area/category, or these may already be in your leads list.</p>
+			{/if}
 			<a href="/" class="view-link">View leads →</a>
 		</div>
 	{/if}
@@ -430,6 +508,42 @@
 		cursor: not-allowed;
 	}
 
+	.location-search {
+		display: flex;
+		gap: 0.4rem;
+	}
+
+	.location-search input {
+		flex: 1;
+	}
+
+	.location-btn {
+		background: var(--bg-surface);
+		border: 1px solid var(--border-subtle);
+		color: var(--text-muted);
+		padding: 0.55rem 0.85rem;
+		border-radius: var(--radius-sm);
+		font-size: 0.85rem;
+		cursor: pointer;
+		white-space: nowrap;
+		transition: border-color var(--dur-fast), color var(--dur-fast);
+	}
+
+	.location-btn:hover:not(:disabled) {
+		border-color: var(--accent-primary);
+		color: var(--text-primary);
+	}
+
+	.location-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.error-hint {
+		color: #f87171;
+		opacity: 0.9;
+	}
+
 	.draw-map {
 		width: 100%;
 		height: 280px;
@@ -589,6 +703,10 @@
 		}
 
 		.mode-btn {
+			min-height: 44px;
+		}
+
+		.location-btn {
 			min-height: 44px;
 		}
 	}
