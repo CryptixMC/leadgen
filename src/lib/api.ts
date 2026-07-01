@@ -1,3 +1,5 @@
+import type { LatLng } from '$lib/geo';
+
 const BASE = '/api';
 
 export interface Lead {
@@ -206,12 +208,19 @@ export async function triggerScrape(
 	category: string,
 	city: string,
 	target: number,
-	neighborhood?: string
+	neighborhood?: string,
+	polygon?: LatLng[]
 ): Promise<{ upserted: number; category: string; city: string; pages_fetched: number }> {
 	const res = await fetch(`${BASE}/scrapes`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ category, city, target, neighborhood: neighborhood || undefined })
+		body: JSON.stringify({
+			category,
+			city: polygon ? undefined : city,
+			target,
+			neighborhood: neighborhood || undefined,
+			polygon: polygon || undefined
+		})
 	});
 	if (!res.ok) throw new Error(`Scrape failed: ${res.statusText}`);
 	return res.json();

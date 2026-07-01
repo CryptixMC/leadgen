@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { fetchLeads, geocodeMissing, type Lead } from '$lib/api';
+	import { pointInPolygon, haversineKm, type LatLng } from '$lib/geo';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -15,6 +16,12 @@
 	let routeMode = $state(false);
 	let routeStops = $state<Lead[]>([]);
 	let routePolyline: any = null;
+
+	// Draw-area mode state
+	let drawMode = $state(false);
+	let drawnPolygon = $state<LatLng[] | null>(null);
+	let drawnItemsLayer: any = null;
+	let drawControl: any = null;
 
 	let mapContainer: HTMLDivElement;
 	let mapInstance: any = null;
@@ -35,16 +42,6 @@
 		if (priority === 'high') return { fill: '#D946EF', border: '#6B21A8' };
 		if (priority === 'medium') return { fill: '#818cf8', border: '#4f46e5' };
 		return { fill: '#9090B0', border: '#4a4a6e' };
-	}
-
-	function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
-		const R = 6371;
-		const dLat = ((lat2 - lat1) * Math.PI) / 180;
-		const dLng = ((lng2 - lng1) * Math.PI) / 180;
-		const a =
-			Math.sin(dLat / 2) ** 2 +
-			Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
-		return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 	}
 
 	function optimizeRoute() {
@@ -91,6 +88,7 @@
 	function clearRoute() {
 		routeStops = [];
 		if (routePolyline) { routePolyline.remove(); routePolyline = null; }
+		clearDrawnPolygon();
 		renderMarkers();
 	}
 
@@ -98,6 +96,42 @@
 		routeMode = !routeMode;
 		if (!routeMode) clearRoute();
 		else renderMarkers();
+	}
+
+	function clearDrawnPolygon() {
+		if (drawnItemsLayer) drawnItemsLayer.clearLayers();
+		drawnPolygon = null;
+	}
+
+	function toggleDrawMode() {
+		drawMode = !drawMode;
+		if (!mapInstance || !L || !drawControl) return;
+		if (drawMode) {
+			mapInstance.addControl(drawControl);
+		} else {
+			mapInstance.removeControl(drawControl);
+		}
+	}
+
+	function applyPolygonSelection() {
+		if (!drawnPolygon) return;
+		const selected = withCoords.filter((l) =>
+			pointInPolygon(l.latitude!, l.longitude!, drawnPolygon!)
+		);
+		routeStops = selected;
+		routeMode = true;
+		drawMode = false;
+		if (mapInstance && drawControl) mapInstance.removeControl(drawControl);
+		drawRoutePolyline();
+		renderMarkers();
+	}
+
+	function handlePolygonCreated(e: any) {
+		if (drawnItemsLayer) drawnItemsLayer.clearLayers();
+		drawnItemsLayer.addLayer(e.layer);
+		const latlngs = e.layer.getLatLngs()[0] as Array<{ lat: number; lng: number }>;
+		drawnPolygon = latlngs.map((p) => [p.lat, p.lng] as LatLng);
+		applyPolygonSelection();
 	}
 
 	function buildGoogleMapsUrl(): string {
@@ -176,10 +210,26 @@
 
 	onMount(async () => {
 		L = (await import('leaflet')).default;
+		await import('leaflet-draw');
 		mapInstance = L.map(mapContainer).setView([49.8, -97.1], 10);
 		L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 			attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
 		}).addTo(mapInstance);
+
+		drawnItemsLayer = new L.FeatureGroup().addTo(mapInstance);
+		drawControl = new L.Control.Draw({
+			draw: {
+				polygon: true,
+				rectangle: true,
+				marker: false,
+				circle: false,
+				circlemarker: false,
+				polyline: false
+			},
+			edit: { featureGroup: drawnItemsLayer }
+		});
+		mapInstance.on(L.Draw.Event.CREATED, handlePolygonCreated);
+
 		renderMarkers();
 		if (withCoords.length > 0) {
 			const pts = withCoords.map((l) => [l.latitude!, l.longitude!] as [number, number]);
@@ -204,6 +254,7 @@
 <svelte:head>
 	<title>Map — LeadGen</title>
 	<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+	<link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
 </svelte:head>
 
 <div class="toolbar">
@@ -236,7 +287,13 @@
 	<button onclick={toggleRouteMode} class="route-toggle-btn" class:active={routeMode}>
 		{routeMode ? '✕ Exit Route Mode' : '🚶 Plan Route'}
 	</button>
+	<button onclick={toggleDrawMode} class="route-toggle-btn draw-toggle-btn" class:active={drawMode}>
+		{drawMode ? '✕ Exit Draw' : '✏️ Draw Area'}
+	</button>
 </div>
+{#if drawMode}
+	<p class="draw-hint">Draw a polygon or rectangle on the map to select every lead inside it and start a route.</p>
+{/if}
 
 <div class="map-wrapper">
 	<div bind:this={mapContainer} class="map"></div>
@@ -376,6 +433,19 @@
 		background: rgba(124, 58, 237, 0.2);
 		border-color: #7C3AED;
 		color: #C4B5FD;
+	}
+
+	.draw-toggle-btn {
+		margin-left: 0;
+	}
+
+	.draw-hint {
+		width: 100%;
+		padding: 0.4rem 2rem 0;
+		margin: 0;
+		color: var(--text-muted);
+		font-size: 0.78rem;
+		opacity: 0.75;
 	}
 
 	.map-wrapper {
