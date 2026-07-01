@@ -73,6 +73,21 @@ const NON_BUSINESS_TYPES = new Set([
 // businesses, but not useful in a broad "all businesses" sweep).
 const ALL_BUSINESSES_EXCLUDE_TYPES = new Set([...NON_BUSINESS_TYPES, 'library', 'funeral_home']);
 
+// Google's `lodging` type covers hotels/motels/inns/extended-stay properties.
+// Some extended-stay/serviced-apartment properties end up with one listing per
+// room instead of one per property — this heuristic catches those without
+// excluding legitimate hotels/motels/B&Bs (which aren't excluded by type).
+const ROOM_LISTING_PATTERN = /\b(room|rm|unit|suite|ste|apt|apartment)\.?\s*#?\d+\b/i;
+
+export interface NewLeadSummary {
+	id: string;
+	business_name: string;
+	address: string;
+	category: string | null;
+	phone: string;
+	google_place_id: string;
+}
+
 // Generic Google Places types that appear on almost every place regardless of
 // business type — skipped when picking a per-lead category label.
 const GENERIC_PLACE_TYPES = new Set([
@@ -157,13 +172,18 @@ async function fetchNearbyPage(
 	});
 }
 
-async function upsertPlace(place: Record<string, unknown>, apiKey: string): Promise<boolean> {
+interface UpsertResult {
+	success: boolean;
+	newLead?: NewLeadSummary;
+}
+
+async function upsertPlace(place: Record<string, unknown>, apiKey: string): Promise<UpsertResult> {
 	const placeId = place.place_id as string | undefined;
-	if (!placeId) return false;
+	if (!placeId) return { success: false };
 
 	// Skip attractions, parks, transit stops, and other non-business place types
 	const types = (place.types as string[] | undefined) ?? [];
-	if (types.some((t) => NON_BUSINESS_TYPES.has(t))) return false;
+	if (types.some((t) => NON_BUSINESS_TYPES.has(t))) return { success: false };
 
 	const detailData = await getWithBackoff(PLACES_DETAIL_URL, {
 		place_id: placeId,
@@ -175,7 +195,7 @@ async function upsertPlace(place: Record<string, unknown>, apiKey: string): Prom
 	// Skip places that are closed — not a viable lead to contact right now
 	const businessStatus = detail.business_status as string | undefined;
 	if (businessStatus === 'CLOSED_PERMANENTLY' || businessStatus === 'CLOSED_TEMPORARILY') {
-		return false;
+		return { success: false };
 	}
 
 	let website = (detail.website as string) || (place.website as string) || null;
@@ -225,6 +245,14 @@ async function upsertPlace(place: Record<string, unknown>, apiKey: string): Prom
 
 	// Generate LinkedIn search URL if we have an owner name
 	const businessName = (detail.name as string) || (place.name as string) || '';
+
+	// Skip individual room/unit listings within a lodging property (Google
+	// sometimes creates one Business Profile per room for extended-stay /
+	// serviced-apartment properties) — legitimate hotels/motels are untouched.
+	if (types.includes('lodging') && ROOM_LISTING_PATTERN.test(businessName)) {
+		return { success: false };
+	}
+
 	const address = (detail.formatted_address as string) || (place.formatted_address as string) || '';
 	const city = address.includes(',') ? address.split(',')[1].trim() : address;
 	const linkedinSearchUrl = ownerName
@@ -264,15 +292,30 @@ async function upsertPlace(place: Record<string, unknown>, apiKey: string): Prom
 		.eq('google_place_id', placeId)
 		.maybeSingle();
 	if (existing.data) {
-		if (existing.data.hidden) return false;
+		if (existing.data.hidden) return { success: false };
 		const { error: updateErr } = await db.from('leads').update(lead).eq('google_place_id', placeId);
 		if (updateErr) throw new Error(`Failed to update lead: ${updateErr.message}`);
-	} else {
-		lead.created_at = now;
-		const { error: insertErr } = await db.from('leads').insert(lead);
-		if (insertErr) throw new Error(`Failed to insert lead: ${insertErr.message}`);
+		return { success: true };
 	}
-	return true;
+
+	lead.created_at = now;
+	const { data: insertedRow, error: insertErr } = await db
+		.from('leads')
+		.insert(lead)
+		.select('id')
+		.single();
+	if (insertErr) throw new Error(`Failed to insert lead: ${insertErr.message}`);
+	return {
+		success: true,
+		newLead: {
+			id: insertedRow.id,
+			business_name: businessName,
+			address,
+			category: lead.category as string | null,
+			phone: lead.phone as string,
+			google_place_id: placeId
+		}
+	};
 }
 
 export async function runScrape(
@@ -280,7 +323,7 @@ export async function runScrape(
 	city: string,
 	target: number,
 	neighborhood?: string
-): Promise<{ upserted: number; category: string; city: string; pages_fetched: number }> {
+): Promise<{ upserted: number; category: string; city: string; pages_fetched: number; newLeads: NewLeadSummary[] }> {
 	const apiKey = GOOGLE_PLACES_API_KEY;
 	if (!apiKey) throw new Error('GOOGLE_PLACES_API_KEY not configured');
 
@@ -289,17 +332,18 @@ export async function runScrape(
 	let pagesFetched = 0;
 	let seedLat: number | null = null;
 	let seedLng: number | null = null;
+	const newLeads: NewLeadSummary[] = [];
 
 	const sem = new Semaphore(15);
 
-	const upsertSafe = async (place: Record<string, unknown>): Promise<boolean> => {
-		if (!isCommercialPlace(place)) return false;
+	const upsertSafe = async (place: Record<string, unknown>): Promise<UpsertResult> => {
+		if (!isCommercialPlace(place)) return { success: false };
 		await sem.acquire();
 		try {
 			return await upsertPlace(place, apiKey);
 		} catch (err) {
 			console.error('upsertPlace failed:', err instanceof Error ? err.message : err);
-			return false;
+			return { success: false };
 		} finally {
 			sem.release();
 		}
@@ -363,7 +407,8 @@ export async function runScrape(
 
 	const batch = places.slice(0, safeTarget);
 	const results = await Promise.all(batch.map(upsertSafe));
-	upserted += results.filter(Boolean).length;
+	upserted += results.filter((r) => r.success).length;
+	for (const r of results) if (r.newLead) newLeads.push(r.newLead);
 
 	if (upserted < safeTarget && seedLat !== null) {
 		// Use tighter radius for neighborhood searches
@@ -391,14 +436,15 @@ export async function runScrape(
 			const nearbyPlaces = (nearbyData.results as Array<Record<string, unknown>>) ?? [];
 			const nearbyBatch = nearbyPlaces.slice(0, safeTarget - upserted);
 			const nearbyResults = await Promise.all(nearbyBatch.map(upsertSafe));
-			upserted += nearbyResults.filter(Boolean).length;
+			upserted += nearbyResults.filter((r) => r.success).length;
+			for (const r of nearbyResults) if (r.newLead) newLeads.push(r.newLead);
 
 			nextPageToken = (nearbyData.next_page_token as string) ?? null;
 			if (!nextPageToken) break;
 		}
 	}
 
-	return { upserted, category: allBusinesses ? 'all businesses' : category, city, pages_fetched: pagesFetched };
+	return { upserted, category: allBusinesses ? 'all businesses' : category, city, pages_fetched: pagesFetched, newLeads };
 }
 
 const GRID_CELL_RADIUS_M = DEFAULT_CELL_RADIUS_M;
@@ -413,7 +459,7 @@ export async function runScrapePolygon(
 	category: string,
 	polygon: LatLng[],
 	target: number
-): Promise<{ upserted: number; category: string; city: string; pages_fetched: number }> {
+): Promise<{ upserted: number; category: string; city: string; pages_fetched: number; newLeads: NewLeadSummary[] }> {
 	const apiKey = GOOGLE_PLACES_API_KEY;
 	if (!apiKey) throw new Error('GOOGLE_PLACES_API_KEY not configured');
 
@@ -428,6 +474,7 @@ export async function runScrapePolygon(
 	const allBusinesses = !category || category === '*';
 	let upserted = 0;
 	let pagesFetched = 0;
+	const newLeads: NewLeadSummary[] = [];
 
 	const upsertSem = new Semaphore(15);
 	const cellSem = new Semaphore(3);
@@ -439,8 +486,8 @@ export async function runScrapePolygon(
 		return !types.some((t) => ALL_BUSINESSES_EXCLUDE_TYPES.has(t));
 	}
 
-	const upsertSafe = async (place: Record<string, unknown>): Promise<boolean> => {
-		if (!isCommercialPlace(place)) return false;
+	const upsertSafe = async (place: Record<string, unknown>): Promise<UpsertResult> => {
+		if (!isCommercialPlace(place)) return { success: false };
 		await upsertSem.acquire();
 		try {
 			return await upsertPlace(place, apiKey);
@@ -464,7 +511,8 @@ export async function runScrapePolygon(
 		if (!fresh.length) return;
 		const batch = fresh.slice(0, Math.max(0, safeTarget - upserted));
 		const results = await Promise.all(batch.map(upsertSafe));
-		upserted += results.filter(Boolean).length;
+		upserted += results.filter((r) => r.success).length;
+		for (const r of results) if (r.newLead) newLeads.push(r.newLead);
 	}
 
 	async function fetchNextCellPage(
@@ -519,7 +567,8 @@ export async function runScrapePolygon(
 		upserted,
 		category: allBusinesses ? 'all businesses' : category,
 		city: 'Custom drawn area',
-		pages_fetched: pagesFetched
+		pages_fetched: pagesFetched,
+		newLeads
 	};
 }
 

@@ -51,6 +51,15 @@ export interface Lead {
 	social_activity_score: number | null;
 }
 
+export interface NewLeadSummary {
+	id: string;
+	business_name: string;
+	address: string;
+	category: string | null;
+	phone: string;
+	google_place_id: string;
+}
+
 export interface Client {
 	id: string;
 	lead_id: string | null;
@@ -211,7 +220,7 @@ export async function triggerScrape(
 	target: number,
 	neighborhood?: string,
 	polygon?: LatLng[]
-): Promise<{ upserted: number; category: string; city: string; pages_fetched: number }> {
+): Promise<{ upserted: number; category: string; city: string; pages_fetched: number; newLeads?: NewLeadSummary[] }> {
 	const res = await fetch(`${BASE}/scrapes`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
