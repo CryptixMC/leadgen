@@ -30,11 +30,12 @@ export async function sendEmail(opts: SendEmailOptions): Promise<{ messageId: st
 		: '';
 
 	const html = `<div style="font-family:inherit; font-size:14px; line-height:1.6;">${textToHtml(opts.body)}</div>${signatureHtml}`;
+	const subject = opts.subject.replace(/[\r\n]+/g, ' ');
 
 	const info = await transport.sendMail({
 		from: SMTP_FROM || SMTP_USER,
 		to: opts.to,
-		subject: opts.subject,
+		subject,
 		text: opts.body,
 		html
 	});

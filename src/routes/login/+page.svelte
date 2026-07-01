@@ -1,40 +1,19 @@
 <script lang="ts">
-	import { supabase } from '$lib/supabase.js';
 	import { goto } from '$app/navigation';
+	import { enhance } from '$app/forms';
 	import favicon from '$lib/assets/favicon.svg';
 	import { enterDemo, clearDemo } from '$lib/demo/state';
+	import type { ActionData } from './$types';
+
+	let { form }: { form: ActionData } = $props();
 
 	let email = $state('');
 	let password = $state('');
-	let error = $state('');
 	let loading = $state(false);
 
 	function handleDemo() {
 		enterDemo();
 		goto('/pipeline');
-	}
-
-	async function handleSubmit(e: Event) {
-		e.preventDefault();
-		loading = true;
-		error = '';
-
-		const { data, error: authError } = await supabase.auth.signInWithPassword({
-			email,
-			password
-		});
-
-		if (authError || !data.session) {
-			error = authError?.message ?? 'Sign in failed';
-			loading = false;
-			return;
-		}
-
-		const maxAge = data.session.expires_in ?? 3600;
-		document.cookie = `sb_access_token=${data.session.access_token}; path=/; max-age=${maxAge}; SameSite=Lax`;
-
-		clearDemo();
-		goto('/');
 	}
 </script>
 
@@ -51,11 +30,22 @@
 		<h1>LeadGen.</h1>
 		<p class="sub">Liam Nicholson · Internal tool</p>
 
-		<form onsubmit={handleSubmit}>
+		<form
+			method="POST"
+			use:enhance={() => {
+				loading = true;
+				return async ({ result, update }) => {
+					if (result.type === 'redirect') clearDemo();
+					await update();
+					loading = false;
+				};
+			}}
+		>
 			<div class="field">
 				<label for="email">Email</label>
 				<input
 					id="email"
+					name="email"
 					type="email"
 					bind:value={email}
 					placeholder="you@example.com"
@@ -69,6 +59,7 @@
 				<label for="password">Password</label>
 				<input
 					id="password"
+					name="password"
 					type="password"
 					bind:value={password}
 					placeholder="••••••••"
@@ -78,8 +69,8 @@
 				/>
 			</div>
 
-			{#if error}
-				<p class="error">{error}</p>
+			{#if form?.error}
+				<p class="error">{form.error}</p>
 			{/if}
 
 			<button type="submit" disabled={loading || !email || !password}>
