@@ -25,7 +25,7 @@
 			exitDemo();
 		} else {
 			await supabase?.auth.signOut();
-			document.cookie = 'sb_access_token=; path=/; max-age=0; SameSite=Lax';
+			await fetch('/logout', { method: 'POST' });
 			goto('/login');
 		}
 	}

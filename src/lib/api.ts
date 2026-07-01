@@ -1,8 +1,11 @@
+import type { LatLng } from '$lib/geo';
+
 const BASE = '/api';
 
 export interface Lead {
 	id: string;
 	business_name: string;
+	category: string | null;
 	address: string;
 	phone: string;
 	website_url: string | null;
@@ -215,14 +218,45 @@ export async function triggerScrape(
 	category: string,
 	city: string,
 	target: number,
-	neighborhood?: string
+	neighborhood?: string,
+	polygon?: LatLng[]
 ): Promise<{ upserted: number; category: string; city: string; pages_fetched: number }> {
 	const res = await fetch(`${BASE}/scrapes`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ category, city, target, neighborhood: neighborhood || undefined })
+		body: JSON.stringify({
+			category,
+			city: polygon ? undefined : city,
+			target,
+			neighborhood: neighborhood || undefined,
+			polygon: polygon || undefined
+		})
 	});
-	if (!res.ok) throw new Error(`Scrape failed: ${res.statusText}`);
+	if (!res.ok) {
+		let detail: string;
+		try {
+			const json = await res.json();
+			detail = json.message || json.error || res.statusText;
+		} catch {
+			detail = res.statusText;
+		}
+		throw new Error(`Scrape failed: ${detail}`);
+	}
+	return res.json();
+}
+
+export async function geocodeLocation(query: string): Promise<{ lat: number; lng: number } | null> {
+	const res = await fetch(`${BASE}/geocode?query=${encodeURIComponent(query)}`);
+	if (!res.ok) {
+		let detail: string;
+		try {
+			const json = await res.json();
+			detail = json.message || json.error || res.statusText;
+		} catch {
+			detail = res.statusText;
+		}
+		throw new Error(`Geocode failed: ${detail}`);
+	}
 	return res.json();
 }
 

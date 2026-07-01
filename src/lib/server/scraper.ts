@@ -1,6 +1,13 @@
 import { GOOGLE_PLACES_API_KEY } from '$env/static/private';
 import { db } from './db.js';
 import { isSocialMediaUrl } from './utils.js';
+import {
+	generateCoveringGrid,
+	pointInPolygon,
+	DEFAULT_CELL_RADIUS_M,
+	MAX_GRID_CELLS,
+	type LatLng
+} from '$lib/geo';
 
 const PLACES_SEARCH_URL = 'https://maps.googleapis.com/maps/api/place/textsearch/json';
 const PLACES_NEARBY_URL = 'https://maps.googleapis.com/maps/api/place/nearbysearch/json';
@@ -42,6 +49,51 @@ const NON_BUSINESS_TYPES = new Set([
 	'postal_code',
 	'landmark',
 ]);
+
+// Types that indicate a non-commercial place — filter these out in "all businesses" mode
+const ALL_BUSINESSES_EXCLUDE_TYPES = new Set([
+	'tourist_attraction',
+	'natural_feature',
+	'park',
+	'route',
+	'political',
+	'transit_station',
+	'train_station',
+	'bus_station',
+	'subway_station',
+	'airport',
+	'stadium',
+	'amusement_park',
+	'cemetery',
+	'city_hall',
+	'courthouse',
+	'embassy',
+	'fire_station',
+	'funeral_home',
+	'library',
+	'local_government_office',
+	'police',
+	'post_office'
+]);
+
+// Generic Google Places types that appear on almost every place regardless of
+// business type — skipped when picking a per-lead category label.
+const GENERIC_PLACE_TYPES = new Set([
+	'point_of_interest',
+	'establishment',
+	'premise',
+	'subpremise',
+	'geocode',
+]);
+
+function deriveCategory(types: string[]): string | null {
+	const first = types.find((t) => !GENERIC_PLACE_TYPES.has(t));
+	if (!first) return null;
+	return first
+		.split('_')
+		.map((w) => w[0].toUpperCase() + w.slice(1))
+		.join(' ');
+}
 
 export class Semaphore {
 	private queue: Array<() => void> = [];
@@ -179,6 +231,7 @@ async function upsertPlace(place: Record<string, unknown>, apiKey: string): Prom
 	const now = new Date().toISOString();
 	const lead: Record<string, unknown> = {
 		business_name: businessName,
+		category: deriveCategory(types),
 		address,
 		phone: (detail.formatted_phone_number as string) || '',
 		website_url: website,
@@ -209,10 +262,12 @@ async function upsertPlace(place: Record<string, unknown>, apiKey: string): Prom
 		.maybeSingle();
 	if (existing.data) {
 		if (existing.data.hidden) return false;
-		await db.from('leads').update(lead).eq('google_place_id', placeId);
+		const { error: updateErr } = await db.from('leads').update(lead).eq('google_place_id', placeId);
+		if (updateErr) throw new Error(`Failed to update lead: ${updateErr.message}`);
 	} else {
 		lead.created_at = now;
-		await db.from('leads').insert(lead);
+		const { error: insertErr } = await db.from('leads').insert(lead);
+		if (insertErr) throw new Error(`Failed to insert lead: ${insertErr.message}`);
 	}
 	return true;
 }
@@ -239,6 +294,9 @@ export async function runScrape(
 		await sem.acquire();
 		try {
 			return await upsertPlace(place, apiKey);
+		} catch (err) {
+			console.error('upsertPlace failed:', err instanceof Error ? err.message : err);
+			return false;
 		} finally {
 			sem.release();
 		}
@@ -246,36 +304,10 @@ export async function runScrape(
 
 	const allBusinesses = !category || category === '*';
 
-	// Types that indicate a non-commercial place — filter these out in "all businesses" mode
-	const NON_BUSINESS_TYPES = new Set([
-		'tourist_attraction',
-		'natural_feature',
-		'park',
-		'route',
-		'political',
-		'transit_station',
-		'train_station',
-		'bus_station',
-		'subway_station',
-		'airport',
-		'stadium',
-		'amusement_park',
-		'cemetery',
-		'city_hall',
-		'courthouse',
-		'embassy',
-		'fire_station',
-		'funeral_home',
-		'library',
-		'local_government_office',
-		'police',
-		'post_office'
-	]);
-
 	function isCommercialPlace(place: Record<string, unknown>): boolean {
 		if (!allBusinesses) return true;
 		const types = (place.types as string[]) ?? [];
-		return !types.some((t) => NON_BUSINESS_TYPES.has(t));
+		return !types.some((t) => ALL_BUSINESSES_EXCLUDE_TYPES.has(t));
 	}
 
 	// Build the text search query — neighborhood-scoped if provided
@@ -364,4 +396,144 @@ export async function runScrape(
 	}
 
 	return { upserted, category: allBusinesses ? 'all businesses' : category, city, pages_fetched: pagesFetched };
+}
+
+const GRID_CELL_RADIUS_M = DEFAULT_CELL_RADIUS_M;
+const MAX_PAGES_PER_CELL = 2;
+
+/**
+ * Google Places Nearby Search only supports center+radius queries, so an
+ * arbitrary drawn polygon is covered by tiling its bounding box into a grid
+ * of overlapping circles, then rejecting any result outside the polygon.
+ */
+export async function runScrapePolygon(
+	category: string,
+	polygon: LatLng[],
+	target: number
+): Promise<{ upserted: number; category: string; city: string; pages_fetched: number }> {
+	const apiKey = GOOGLE_PLACES_API_KEY;
+	if (!apiKey) throw new Error('GOOGLE_PLACES_API_KEY not configured');
+
+	const cells = generateCoveringGrid(polygon, GRID_CELL_RADIUS_M);
+	if (cells.length > MAX_GRID_CELLS) {
+		throw new Error(
+			`Drawn area is too large (~${cells.length} search cells, max ${MAX_GRID_CELLS}) — draw a smaller area`
+		);
+	}
+
+	const safeTarget = Math.max(1, target);
+	const allBusinesses = !category || category === '*';
+	let upserted = 0;
+	let pagesFetched = 0;
+
+	const upsertSem = new Semaphore(15);
+	const cellSem = new Semaphore(3);
+	const seenPlaceIds = new Set<string>();
+
+	function isCommercialPlace(place: Record<string, unknown>): boolean {
+		if (!allBusinesses) return true;
+		const types = (place.types as string[]) ?? [];
+		return !types.some((t) => ALL_BUSINESSES_EXCLUDE_TYPES.has(t));
+	}
+
+	const upsertSafe = async (place: Record<string, unknown>): Promise<boolean> => {
+		if (!isCommercialPlace(place)) return false;
+		await upsertSem.acquire();
+		try {
+			return await upsertPlace(place, apiKey);
+		} finally {
+			upsertSem.release();
+		}
+	};
+
+	async function processCandidates(places: Array<Record<string, unknown>>): Promise<void> {
+		const fresh: Array<Record<string, unknown>> = [];
+		for (const place of places) {
+			const placeId = place.place_id as string | undefined;
+			if (!placeId || seenPlaceIds.has(placeId)) continue;
+			seenPlaceIds.add(placeId);
+			const location = (place.geometry as Record<string, unknown>)?.location as
+				| Record<string, number>
+				| undefined;
+			if (!location || !pointInPolygon(location.lat, location.lng, polygon)) continue;
+			fresh.push(place);
+		}
+		if (!fresh.length) return;
+		const batch = fresh.slice(0, Math.max(0, safeTarget - upserted));
+		const results = await Promise.all(batch.map(upsertSafe));
+		upserted += results.filter(Boolean).length;
+	}
+
+	async function fetchNextCellPage(
+		lat: number,
+		lng: number,
+		nextPageToken: string | null
+	): Promise<Record<string, unknown>> {
+		if (!nextPageToken) {
+			return getWithBackoff(PLACES_NEARBY_URL, {
+				location: `${lat},${lng}`,
+				radius: GRID_CELL_RADIUS_M,
+				...(allBusinesses ? {} : { keyword: category }),
+				key: apiKey
+			});
+		}
+		const delays = [800, 1200, 1800, 2700, 4000];
+		for (const delay of delays) {
+			await new Promise((r) => setTimeout(r, delay));
+			const data = await getWithBackoff(PLACES_NEARBY_URL, { pagetoken: nextPageToken, key: apiKey });
+			if (data.status !== 'INVALID_REQUEST') return data;
+		}
+		return { status: 'ZERO_RESULTS', results: [] };
+	}
+
+	async function scanCell([lat, lng]: LatLng): Promise<void> {
+		if (upserted >= safeTarget) return;
+		await cellSem.acquire();
+		try {
+			let nextPageToken: string | null = null;
+			let page = 0;
+			do {
+				if (upserted >= safeTarget) break;
+				const data = await fetchNextCellPage(lat, lng, nextPageToken);
+				const status = data.status as string;
+				if (status !== 'OK' && status !== 'ZERO_RESULTS') {
+					throw new Error(`Places API error: ${status}`);
+				}
+				pagesFetched++;
+				page++;
+				const places = (data.results as Array<Record<string, unknown>>) ?? [];
+				await processCandidates(places);
+				nextPageToken = (data.next_page_token as string) ?? null;
+			} while (nextPageToken && page < MAX_PAGES_PER_CELL);
+		} finally {
+			cellSem.release();
+		}
+	}
+
+	await Promise.all(cells.map(scanCell));
+
+	return {
+		upserted,
+		category: allBusinesses ? 'all businesses' : category,
+		city: 'Custom drawn area',
+		pages_fetched: pagesFetched
+	};
+}
+
+/** Geocodes free-text (address/neighborhood/city) to a point via Places Text Search. */
+export async function geocodeLocation(query: string): Promise<{ lat: number; lng: number } | null> {
+	const apiKey = GOOGLE_PLACES_API_KEY;
+	if (!apiKey) throw new Error('GOOGLE_PLACES_API_KEY not configured');
+
+	const data = await getWithBackoff(PLACES_SEARCH_URL, { query, key: apiKey });
+	const status = data.status as string;
+	if (status !== 'OK' && status !== 'ZERO_RESULTS') {
+		throw new Error(`Places API error: ${status}`);
+	}
+	const places = (data.results as Array<Record<string, unknown>>) ?? [];
+	if (!places.length) return null;
+	const loc = (places[0].geometry as Record<string, unknown>)?.location as
+		| Record<string, number>
+		| undefined;
+	return loc ? { lat: loc.lat, lng: loc.lng } : null;
 }
