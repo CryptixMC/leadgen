@@ -8,6 +8,7 @@ const DDG_SEARCH_URL = 'https://html.duckduckgo.com/html/';
 
 const EMAIL_RE = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
 const EMAIL_EXCLUDE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.pdf']);
+const PHONE_RE = /\(?\d{3}\)?[\s\-\.]\d{3}[\s\-\.]\d{4}/g;
 const COPYRIGHT_RE = /(?:©|&copy;|Copyright\s*(?:©|&copy;)?\s*)(\d{4})/gi;
 const CURRENT_YEAR = new Date().getFullYear();
 
@@ -194,6 +195,44 @@ export async function discoverWebsite(
 	return { websiteUrl: null, discoveredSocial };
 }
 
+function extractContactInfo($: ReturnType<typeof cheerioLoad>): { email: string | null; phone: string | null } {
+	let email: string | null = null;
+	let phone: string | null = null;
+
+	$('a[href]').each((_, el) => {
+		const href = $(el).attr('href') ?? '';
+		if (!email && href.startsWith('mailto:')) {
+			const candidate = href.slice(7).split('?')[0].trim();
+			EMAIL_RE.lastIndex = 0;
+			if (EMAIL_RE.test(candidate)) email = candidate;
+		}
+		if (!phone && href.startsWith('tel:')) {
+			const candidate = href.slice(4).trim();
+			if (candidate.replace(/\D/g, '').length >= 10) phone = candidate;
+		}
+	});
+
+	const text = $.text();
+	if (!email) {
+		EMAIL_RE.lastIndex = 0;
+		let match: RegExpExecArray | null;
+		while ((match = EMAIL_RE.exec(text)) !== null) {
+			const candidate = match[0];
+			if (!EMAIL_EXCLUDE_EXTS.has(candidate.toLowerCase().replace(/.*(\.[^.]+)$/, '$1'))) {
+				email = candidate;
+				break;
+			}
+		}
+	}
+	if (!phone) {
+		PHONE_RE.lastIndex = 0;
+		const match = PHONE_RE.exec(text);
+		if (match) phone = match[0];
+	}
+
+	return { email, phone };
+}
+
 export async function scrapeWebsite(url: string, { subpages = true } = {}): Promise<Record<string, unknown>> {
 	const result: Record<string, unknown> = {
 		email: null,
@@ -210,32 +249,7 @@ export async function scrapeWebsite(url: string, { subpages = true } = {}): Prom
 		const html = await resp.text();
 		const $ = cheerioLoad(html);
 
-		// Email: mailto: links first, then regex scan
-		let foundEmail: string | null = null;
-		$('a[href]').each((_, el) => {
-			if (foundEmail) return;
-			const href = $(el).attr('href') ?? '';
-			if (href.startsWith('mailto:')) {
-				const candidate = href.slice(7).split('?')[0].trim();
-				if (EMAIL_RE.test(candidate)) {
-					foundEmail = candidate;
-					EMAIL_RE.lastIndex = 0;
-				}
-			}
-		});
-
-		if (!foundEmail) {
-			const text = $.text();
-			EMAIL_RE.lastIndex = 0;
-			let match: RegExpExecArray | null;
-			while ((match = EMAIL_RE.exec(text)) !== null) {
-				const candidate = match[0];
-				if (!EMAIL_EXCLUDE_EXTS.has(candidate.toLowerCase().replace(/.*(\.[^.]+)$/, '$1'))) {
-					foundEmail = candidate;
-					break;
-				}
-			}
-		}
+		let foundEmail = extractContactInfo($).email;
 
 		// Email fallback: check /contact and /about sub-pages (deep mode only)
 		if (!foundEmail && subpages) {
@@ -266,33 +280,7 @@ export async function scrapeWebsite(url: string, { subpages = true } = {}): Prom
 					if (!subResp.ok) return null;
 					const subHtml = await subResp.text();
 					const $sub = cheerioLoad(subHtml);
-
-					let subEmail: string | null = null;
-					$sub('a[href]').each((_, el) => {
-						if (subEmail) return;
-						const href = $sub(el).attr('href') ?? '';
-						if (href.startsWith('mailto:')) {
-							const candidate = href.slice(7).split('?')[0].trim();
-							if (EMAIL_RE.test(candidate)) {
-								subEmail = candidate;
-								EMAIL_RE.lastIndex = 0;
-							}
-						}
-					});
-
-					if (!subEmail) {
-						const subText = $sub.text();
-						EMAIL_RE.lastIndex = 0;
-						let subMatch: RegExpExecArray | null;
-						while ((subMatch = EMAIL_RE.exec(subText)) !== null) {
-							const candidate = subMatch[0];
-							if (!EMAIL_EXCLUDE_EXTS.has(candidate.toLowerCase().replace(/.*(\.[^.]+)$/, '$1'))) {
-								subEmail = candidate;
-								break;
-							}
-						}
-					}
-					return subEmail;
+					return extractContactInfo($sub).email;
 				})
 			);
 			for (const r of subResults) {
@@ -341,8 +329,6 @@ export async function scrapeWebsite(url: string, { subpages = true } = {}): Prom
 	}
 	return result;
 }
-
-const PHONE_RE = /\(?\d{3}\)?[\s\-\.]\d{3}[\s\-\.]\d{4}/g;
 
 async function searchSocialProfiles(
 	businessName: string,
@@ -438,6 +424,78 @@ async function extractContactFromSocialBio(
 	} catch {
 		return {};
 	}
+}
+
+const CONTACT_PAGE_KEYWORDS = ['contact', 'about', 'team', 'staff', 'location', 'connect', 'reach', 'get-in-touch'];
+
+export async function findContact(lead: Record<string, unknown>): Promise<{ email: string | null; phone: string | null }> {
+	const needEmail = !lead.email;
+	const needPhone = !lead.phone;
+	let email: string | null = null;
+	let phone: string | null = null;
+
+	const websiteUrl = lead.website_url as string | null;
+	if (websiteUrl && (needEmail || needPhone)) {
+		try {
+			const resp = await fetch(websiteUrl, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(7_000) });
+			if (resp.ok) {
+				const $ = cheerioLoad(await resp.text());
+				const homeContact = extractContactInfo($);
+				if (needEmail && homeContact.email) email = homeContact.email;
+				if (needPhone && homeContact.phone) phone = homeContact.phone;
+
+				if ((needEmail && !email) || (needPhone && !phone)) {
+					const baseUrl = new URL(websiteUrl).origin;
+					const subPageHrefs: string[] = [];
+					$('a[href]').each((_, el) => {
+						const href = $(el).attr('href') ?? '';
+						const lower = href.toLowerCase();
+						if (CONTACT_PAGE_KEYWORDS.some((kw) => lower.includes(kw))) {
+							try {
+								const full = new URL(href, baseUrl).toString();
+								if (full.startsWith(baseUrl) && !subPageHrefs.includes(full)) subPageHrefs.push(full);
+							} catch {
+								// ignore malformed href
+							}
+						}
+					});
+
+					const subResults = await Promise.allSettled(
+						subPageHrefs.slice(0, 5).map(async (subUrl) => {
+							const subResp = await fetch(subUrl, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(8_000) });
+							if (!subResp.ok) return null;
+							return extractContactInfo(cheerioLoad(await subResp.text()));
+						})
+					);
+					for (const r of subResults) {
+						if (r.status !== 'fulfilled' || !r.value) continue;
+						if (needEmail && !email && r.value.email) email = r.value.email;
+						if (needPhone && !phone && r.value.phone) phone = r.value.phone;
+						if ((!needEmail || email) && (!needPhone || phone)) break;
+					}
+				}
+			}
+		} catch {
+			// ignore
+		}
+	}
+
+	if ((needEmail && !email) || (needPhone && !phone)) {
+		const socialOrder = ['instagram_url', 'facebook_url', 'twitter_url', 'tiktok_url', 'youtube_url', 'linkedin_url'];
+		for (const field of socialOrder) {
+			const profileUrl = lead[field] as string | null;
+			if (!profileUrl) continue;
+			const platform = getSocialPlatform(profileUrl);
+			if (!platform) continue;
+
+			const contact = await extractContactFromSocialBio(platform, profileUrl);
+			if (needEmail && !email && contact.email) email = contact.email;
+			if (needPhone && !phone && contact.phone) phone = contact.phone;
+			if ((!needEmail || email) && (!needPhone || phone)) break;
+		}
+	}
+
+	return { email, phone };
 }
 
 async function discoverWebsiteGoogle(

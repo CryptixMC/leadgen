@@ -173,6 +173,15 @@ export async function enrichLead(id: string, { deep = false } = {}): Promise<Lea
 	return res.json();
 }
 
+export async function findContact(id: string): Promise<Lead> {
+	const res = await fetch(`${BASE}/leads/${id}/find-contact`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' }
+	});
+	if (!res.ok) throw new Error(`Find contact failed: ${res.statusText}`);
+	return res.json();
+}
+
 export async function batchDeleteLeads(ids: string[]): Promise<{ deleted: number }> {
 	const res = await fetch(`${BASE}/leads`, {
 		method: 'DELETE',

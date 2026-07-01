@@ -2,7 +2,7 @@
 	import { untrack } from 'svelte';
 	import { enhance } from '$app/forms';
 	import type { PageData } from './$types';
-	import { updateLead, deleteLead, enrichLead, generateEmail, sendLeadEmail, type Lead } from '$lib/api';
+	import { updateLead, deleteLead, enrichLead, findContact, generateEmail, sendLeadEmail, type Lead } from '$lib/api';
 	import { EMAIL_TEMPLATES, fillTemplate, type EmailTemplate } from '$lib/emailTemplates';
 	import { goto } from '$app/navigation';
 
@@ -101,6 +101,7 @@
 	}
 
 	let deepEnriching = $state(false);
+	let findingContact = $state(false);
 
 	async function handleEnrich() {
 		enriching = true;
@@ -126,6 +127,24 @@
 			enrichMsg = 'Deep scan failed.';
 		} finally {
 			deepEnriching = false;
+		}
+		setTimeout(() => (enrichMsg = ''), 3000);
+	}
+
+	async function handleFindContact() {
+		findingContact = true;
+		enrichMsg = '';
+		try {
+			const hadEmail = Boolean(lead.email);
+			const hadPhone = Boolean(lead.phone);
+			lead = await findContact(lead.id);
+			enrichMsg = (lead.email && !hadEmail) || (lead.phone && !hadPhone)
+				? 'Contact found!'
+				: 'No new contact info found.';
+		} catch {
+			enrichMsg = 'Contact search failed.';
+		} finally {
+			findingContact = false;
 		}
 		setTimeout(() => (enrichMsg = ''), 3000);
 	}
@@ -267,12 +286,17 @@
 		<button class="back-btn" onclick={() => goto('/')}>← Back</button>
 		<div class="back-actions">
 			{#if enrichMsg}<span class="save-msg">{enrichMsg}</span>{/if}
-			<button class="enrich-btn" onclick={handleEnrich} disabled={enriching || deepEnriching} title="Quick scan: Yelp, website, email, social links (~10s)">
+			<button class="enrich-btn" onclick={handleEnrich} disabled={enriching || deepEnriching || findingContact} title="Quick scan: Yelp, website, email, social links (~10s)">
 				{enriching ? 'Scanning…' : 'Quick Scan'}
 			</button>
-			<button class="enrich-btn deep-btn" onclick={handleDeepEnrich} disabled={enriching || deepEnriching} title="Deep scan: everything + PageSpeed score + screenshot (~60s)">
+			<button class="enrich-btn deep-btn" onclick={handleDeepEnrich} disabled={enriching || deepEnriching || findingContact} title="Deep scan: everything + PageSpeed score + screenshot (~60s)">
 				{deepEnriching ? 'Deep scanning…' : 'Deep Scan'}
 			</button>
+			{#if !lead.email || !lead.phone}
+				<button class="enrich-btn deep-btn" onclick={handleFindContact} disabled={enriching || deepEnriching || findingContact} title="Dig deeper on the website and known socials for a missing email or phone (~15s)">
+					{findingContact ? 'Searching…' : 'Find Contact'}
+				</button>
+			{/if}
 			{#if lead.email}
 				<button class="email-btn" onclick={openEmailModal}>Send Email</button>
 			{/if}
