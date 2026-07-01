@@ -610,7 +610,7 @@ export async function findContact(lead: Record<string, unknown>): Promise<{ emai
 	const websiteUrl = lead.website_url as string | null;
 	if (websiteUrl && !satisfied()) {
 		try {
-			const resp = await fetch(websiteUrl, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(7_000) });
+			const resp = await fetch(websiteUrl, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(4_000) });
 			if (resp.ok) {
 				const $ = cheerioLoad(await resp.text());
 				const homeContact = extractContactInfo($);
@@ -642,18 +642,12 @@ export async function findContact(lead: Record<string, unknown>): Promise<{ emai
 						if (isKeywordMatch && !subPageUrls.includes(full)) subPageUrls.push(full);
 					});
 
-					const sitemapUrls = await discoverSitemapUrls(baseUrl);
-					for (const url of sitemapUrls) {
-						if (subPageUrls.length >= 15) break;
-						if (!subPageUrls.includes(url)) subPageUrls.push(url);
-					}
-
 					const crawlBatched = async (urlsToCrawl: string[]) => {
 						for (let i = 0; i < urlsToCrawl.length && !satisfied(); i += 8) {
 							const batch = urlsToCrawl.slice(i, i + 8);
 							const batchResults = await Promise.allSettled(
 								batch.map(async (subUrl) => {
-									const subResp = await fetch(subUrl, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(8_000) });
+									const subResp = await fetch(subUrl, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(4_000) });
 									if (!subResp.ok) return null;
 									return extractContactInfo(cheerioLoad(await subResp.text()));
 								})
@@ -688,34 +682,34 @@ export async function findContact(lead: Record<string, unknown>): Promise<{ emai
 	const addr = (lead.address as string) ?? '';
 
 	if (!satisfied()) {
-		const socialOrder = ['instagram_url', 'facebook_url', 'twitter_url', 'tiktok_url', 'youtube_url', 'linkedin_url'];
-		for (const field of socialOrder) {
-			if (satisfied()) break;
-			const profileUrl = lead[field] as string | null;
-			if (!profileUrl) continue;
-			const platform = getSocialPlatform(profileUrl);
-			if (!platform) continue;
+		const socialFields = ['instagram_url', 'facebook_url', 'twitter_url', 'tiktok_url', 'youtube_url', 'linkedin_url'];
+		const socialEntries = socialFields
+			.map((f) => ({ field: f, url: lead[f] as string | null }))
+			.filter((e): e is { field: string; url: string } => typeof e.url === 'string');
 
-			const contact = await extractContactFromSocialBio(platform, profileUrl);
-			if (needEmail && !email && contact.email) email = contact.email;
-			if (needPhone && !phone && contact.phone) phone = contact.phone;
+		const socialResults = await Promise.allSettled(
+			socialEntries.map(async (e) => {
+				const platform = getSocialPlatform(e.url);
+				if (!platform) return null;
+				return extractContactFromSocialBio(platform, e.url);
+			})
+		);
+		for (const r of socialResults) {
+			if (r.status !== 'fulfilled' || !r.value) continue;
+			if (needEmail && !email && r.value.email) email = r.value.email;
+			if (needPhone && !phone && r.value.phone) phone = r.value.phone;
 		}
 	}
 
 	if (!satisfied() && biz) {
 		const newSocials = await searchSocialProfiles(biz, addr, lead);
-		for (const [platform, url] of Object.entries(newSocials)) {
-			if (satisfied()) break;
-			const contact = await extractContactFromSocialBio(platform, url);
-			if (needEmail && !email && contact.email) email = contact.email;
-			if (needPhone && !phone && contact.phone) phone = contact.phone;
-		}
-	}
-
-	if (!satisfied() && biz) {
-		const mentions = await searchContactMentions(biz, addr);
-		if (needEmail && !email && mentions.email) email = mentions.email;
-		if (needPhone && !phone && mentions.phone) phone = mentions.phone;
+		await Promise.allSettled(
+			Object.entries(newSocials).map(async ([platform, url]) => {
+				const contact = await extractContactFromSocialBio(platform, url);
+				if (needEmail && !email && contact.email) email = contact.email;
+				if (needPhone && !phone && contact.phone) phone = contact.phone;
+			})
+		);
 	}
 
 	return { email, phone };

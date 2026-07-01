@@ -1,6 +1,11 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import type { Config } from '@sveltejs/adapter-vercel';
 import { requireAuth } from '$lib/server/auth';
+
+export const config: Config = {
+	maxDuration: 60
+};
 import { runScrape } from '$lib/server/scraper';
 
 export const POST: RequestHandler = async ({ locals, request }) => {
