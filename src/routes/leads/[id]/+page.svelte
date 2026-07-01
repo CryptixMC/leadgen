@@ -293,7 +293,7 @@
 				{deepEnriching ? 'Deep scanning…' : 'Deep Scan'}
 			</button>
 			{#if !lead.email || !lead.phone}
-				<button class="enrich-btn deep-btn" onclick={handleFindContact} disabled={enriching || deepEnriching || findingContact} title="Dig deeper on the website and known socials for a missing email or phone (~15s)">
+				<button class="enrich-btn deep-btn" onclick={handleFindContact} disabled={enriching || deepEnriching || findingContact} title="Exhaustive search: sitemap crawl, structured data, de-obfuscation, social discovery, and web search for a missing email or phone (~45s)">
 					{findingContact ? 'Searching…' : 'Find Contact'}
 				</button>
 			{/if}

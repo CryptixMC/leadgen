@@ -7,6 +7,7 @@ const YELP_SEARCH_URL = 'https://api.yelp.com/v3/businesses/search';
 const DDG_SEARCH_URL = 'https://html.duckduckgo.com/html/';
 
 const EMAIL_RE = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
+const EMAIL_OBFUSCATED_RE = /([a-zA-Z0-9._%+-]+)\s*[\[(]?\s*at\s*[\])]?\s*([a-zA-Z0-9.-]+)\s*[\[(]?\s*dot\s*[\])]?\s*([a-zA-Z]{2,})\b/gi;
 const EMAIL_EXCLUDE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.pdf']);
 const PHONE_RE = /\(?\d{3}\)?[\s\-\.]\d{3}[\s\-\.]\d{4}/g;
 const COPYRIGHT_RE = /(?:©|&copy;|Copyright\s*(?:©|&copy;)?\s*)(\d{4})/gi;
@@ -195,6 +196,42 @@ export async function discoverWebsite(
 	return { websiteUrl: null, discoveredSocial };
 }
 
+// Recursively walk a JSON-LD object graph (schema.org LocalBusiness/Organization/ContactPoint
+// commonly nest email/telephone a level or two deep) looking for contact fields.
+function walkJsonLdContact(node: unknown, found: { email: string | null; phone: string | null }): void {
+	if (!node || typeof node !== 'object') return;
+	if (Array.isArray(node)) {
+		for (const item of node) walkJsonLdContact(item, found);
+		return;
+	}
+	const obj = node as Record<string, unknown>;
+	if (!found.email && typeof obj.email === 'string') {
+		const candidate = obj.email.replace(/^mailto:/i, '').trim();
+		EMAIL_RE.lastIndex = 0;
+		if (EMAIL_RE.test(candidate)) found.email = candidate;
+	}
+	if (!found.phone && typeof obj.telephone === 'string' && obj.telephone.replace(/\D/g, '').length >= 10) {
+		found.phone = obj.telephone.trim();
+	}
+	for (const value of Object.values(obj)) {
+		if (value && typeof value === 'object') walkJsonLdContact(value, found);
+	}
+}
+
+function extractJsonLdContact($: ReturnType<typeof cheerioLoad>): { email: string | null; phone: string | null } {
+	const found = { email: null as string | null, phone: null as string | null };
+	$('script[type="application/ld+json"]').each((_, el) => {
+		if (found.email && found.phone) return;
+		try {
+			const parsed = JSON.parse($(el).contents().text());
+			walkJsonLdContact(parsed, found);
+		} catch {
+			// malformed JSON-LD — ignore
+		}
+	});
+	return found;
+}
+
 function extractContactInfo($: ReturnType<typeof cheerioLoad>): { email: string | null; phone: string | null } {
 	let email: string | null = null;
 	let phone: string | null = null;
@@ -212,6 +249,12 @@ function extractContactInfo($: ReturnType<typeof cheerioLoad>): { email: string 
 		}
 	});
 
+	if (!email || !phone) {
+		const jsonLd = extractJsonLdContact($);
+		if (!email && jsonLd.email) email = jsonLd.email;
+		if (!phone && jsonLd.phone) phone = jsonLd.phone;
+	}
+
 	const text = $.text();
 	if (!email) {
 		EMAIL_RE.lastIndex = 0;
@@ -223,6 +266,12 @@ function extractContactInfo($: ReturnType<typeof cheerioLoad>): { email: string 
 				break;
 			}
 		}
+	}
+	if (!email) {
+		// De-obfuscated fallback: "name [at] domain [dot] com" style anti-scraper text
+		EMAIL_OBFUSCATED_RE.lastIndex = 0;
+		const match = EMAIL_OBFUSCATED_RE.exec(text);
+		if (match) email = `${match[1]}@${match[2]}.${match[3]}`.toLowerCase();
 	}
 	if (!phone) {
 		PHONE_RE.lastIndex = 0;
@@ -426,52 +475,179 @@ async function extractContactFromSocialBio(
 	}
 }
 
-const CONTACT_PAGE_KEYWORDS = ['contact', 'about', 'team', 'staff', 'location', 'connect', 'reach', 'get-in-touch'];
+const CONTACT_PAGE_KEYWORDS = [
+	'contact', 'about', 'team', 'staff', 'location', 'connect', 'reach', 'get-in-touch',
+	'support', 'help', 'careers', 'impressum', 'legal', 'privacy', 'imprint', 'faq',
+	'directions', 'office', 'branch'
+];
+
+// Crawl sitemap.xml (following one level of sitemap-index nesting, or robots.txt's
+// Sitemap: directive as a fallback) to surface pages that aren't linked from the nav/footer.
+async function discoverSitemapUrls(baseUrl: string): Promise<string[]> {
+	const urls: string[] = [];
+
+	async function collectFromXml(xmlUrl: string, depth: number): Promise<void> {
+		if (depth > 1 || urls.length >= 200) return;
+		try {
+			const resp = await fetch(xmlUrl, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(8_000) });
+			if (!resp.ok) return;
+			const xml = await resp.text();
+			const $ = cheerioLoad(xml, { xmlMode: true });
+
+			const childSitemaps = $('sitemap > loc').map((_, el) => $(el).text().trim()).get();
+			if (childSitemaps.length) {
+				for (const child of childSitemaps.slice(0, 3)) {
+					await collectFromXml(child, depth + 1);
+				}
+				return;
+			}
+
+			$('url > loc').each((_, el) => {
+				if (urls.length >= 200) return;
+				const loc = $(el).text().trim();
+				if (loc.startsWith(baseUrl) && !urls.includes(loc)) urls.push(loc);
+			});
+		} catch {
+			// ignore
+		}
+	}
+
+	await collectFromXml(`${baseUrl}/sitemap.xml`, 0);
+
+	if (!urls.length) {
+		try {
+			const robotsResp = await fetch(`${baseUrl}/robots.txt`, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(5_000) });
+			if (robotsResp.ok) {
+				const robotsTxt = await robotsResp.text();
+				const sitemapLines = robotsTxt.split('\n').filter((l) => /^sitemap:/i.test(l.trim()));
+				for (const line of sitemapLines.slice(0, 3)) {
+					const sitemapUrl = line.split(':').slice(1).join(':').trim();
+					if (sitemapUrl) await collectFromXml(sitemapUrl, 0);
+				}
+			}
+		} catch {
+			// ignore
+		}
+	}
+
+	return urls;
+}
+
+// Last resort: search the open web for the business and scan the top non-directory,
+// non-social results for a mention of contact info (citations, press, directory profiles).
+async function searchContactMentions(
+	businessName: string,
+	address: string
+): Promise<{ email: string | null; phone: string | null }> {
+	const city = address.includes(',') ? address.split(',')[1].trim() : address;
+	const query = `"${businessName}" "${city}" contact email phone`;
+	const found: { email: string | null; phone: string | null } = { email: null, phone: null };
+
+	try {
+		const resp = await fetch(DDG_SEARCH_URL, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': BOT_UA },
+			body: new URLSearchParams({ q: query, b: '' }),
+			signal: withTimeout(8_000)
+		});
+		if (!resp.ok) return found;
+
+		const html = await resp.text();
+		const $ = cheerioLoad(html);
+
+		const candidateUrls: string[] = [];
+		for (const el of $('a.result__url, a.result__a').toArray()) {
+			let href = $(el).attr('href') ?? '';
+			if (!href || href.startsWith('//duckduckgo')) continue;
+			if (!href.startsWith('http')) href = 'https://' + href.replace(/^\/+/, '');
+			if (isSocialMediaUrl(href)) continue;
+
+			let domain: string;
+			try {
+				domain = new URL(href).hostname.toLowerCase().replace(/^www\./, '');
+			} catch {
+				continue;
+			}
+			if ([...DIRECTORY_DOMAINS].some((d) => domain === d || domain.endsWith('.' + d))) continue;
+
+			if (!candidateUrls.includes(href)) candidateUrls.push(href);
+			if (candidateUrls.length >= 3) break;
+		}
+
+		const results = await Promise.allSettled(
+			candidateUrls.map(async (url) => {
+				const pageResp = await fetch(url, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(7_000) });
+				if (!pageResp.ok) return null;
+				return extractContactInfo(cheerioLoad(await pageResp.text()));
+			})
+		);
+		for (const r of results) {
+			if (r.status !== 'fulfilled' || !r.value) continue;
+			if (!found.email && r.value.email) found.email = r.value.email;
+			if (!found.phone && r.value.phone) found.phone = r.value.phone;
+			if (found.email && found.phone) break;
+		}
+	} catch {
+		// ignore
+	}
+	return found;
+}
 
 export async function findContact(lead: Record<string, unknown>): Promise<{ email: string | null; phone: string | null }> {
 	const needEmail = !lead.email;
 	const needPhone = !lead.phone;
 	let email: string | null = null;
 	let phone: string | null = null;
+	const satisfied = () => (!needEmail || email) && (!needPhone || phone);
 
 	const websiteUrl = lead.website_url as string | null;
-	if (websiteUrl && (needEmail || needPhone)) {
+	if (websiteUrl && !satisfied()) {
 		try {
 			const resp = await fetch(websiteUrl, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(7_000) });
 			if (resp.ok) {
 				const $ = cheerioLoad(await resp.text());
 				const homeContact = extractContactInfo($);
-				if (needEmail && homeContact.email) email = homeContact.email;
-				if (needPhone && homeContact.phone) phone = homeContact.phone;
+				if (needEmail && !email && homeContact.email) email = homeContact.email;
+				if (needPhone && !phone && homeContact.phone) phone = homeContact.phone;
 
-				if ((needEmail && !email) || (needPhone && !phone)) {
+				if (!satisfied()) {
 					const baseUrl = new URL(websiteUrl).origin;
-					const subPageHrefs: string[] = [];
+					const subPageUrls: string[] = [];
+
 					$('a[href]').each((_, el) => {
 						const href = $(el).attr('href') ?? '';
 						const lower = href.toLowerCase();
 						if (CONTACT_PAGE_KEYWORDS.some((kw) => lower.includes(kw))) {
 							try {
 								const full = new URL(href, baseUrl).toString();
-								if (full.startsWith(baseUrl) && !subPageHrefs.includes(full)) subPageHrefs.push(full);
+								if (full.startsWith(baseUrl) && !subPageUrls.includes(full)) subPageUrls.push(full);
 							} catch {
 								// ignore malformed href
 							}
 						}
 					});
 
-					const subResults = await Promise.allSettled(
-						subPageHrefs.slice(0, 5).map(async (subUrl) => {
-							const subResp = await fetch(subUrl, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(8_000) });
-							if (!subResp.ok) return null;
-							return extractContactInfo(cheerioLoad(await subResp.text()));
-						})
-					);
-					for (const r of subResults) {
-						if (r.status !== 'fulfilled' || !r.value) continue;
-						if (needEmail && !email && r.value.email) email = r.value.email;
-						if (needPhone && !phone && r.value.phone) phone = r.value.phone;
-						if ((!needEmail || email) && (!needPhone || phone)) break;
+					const sitemapUrls = await discoverSitemapUrls(baseUrl);
+					for (const url of sitemapUrls) {
+						if (subPageUrls.length >= 15) break;
+						if (!subPageUrls.includes(url)) subPageUrls.push(url);
+					}
+
+					const capped = subPageUrls.slice(0, 15);
+					for (let i = 0; i < capped.length && !satisfied(); i += 8) {
+						const batch = capped.slice(i, i + 8);
+						const batchResults = await Promise.allSettled(
+							batch.map(async (subUrl) => {
+								const subResp = await fetch(subUrl, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(8_000) });
+								if (!subResp.ok) return null;
+								return extractContactInfo(cheerioLoad(await subResp.text()));
+							})
+						);
+						for (const r of batchResults) {
+							if (r.status !== 'fulfilled' || !r.value) continue;
+							if (needEmail && !email && r.value.email) email = r.value.email;
+							if (needPhone && !phone && r.value.phone) phone = r.value.phone;
+						}
 					}
 				}
 			}
@@ -480,9 +656,13 @@ export async function findContact(lead: Record<string, unknown>): Promise<{ emai
 		}
 	}
 
-	if ((needEmail && !email) || (needPhone && !phone)) {
+	const biz = (lead.business_name as string) ?? '';
+	const addr = (lead.address as string) ?? '';
+
+	if (!satisfied()) {
 		const socialOrder = ['instagram_url', 'facebook_url', 'twitter_url', 'tiktok_url', 'youtube_url', 'linkedin_url'];
 		for (const field of socialOrder) {
+			if (satisfied()) break;
 			const profileUrl = lead[field] as string | null;
 			if (!profileUrl) continue;
 			const platform = getSocialPlatform(profileUrl);
@@ -491,8 +671,23 @@ export async function findContact(lead: Record<string, unknown>): Promise<{ emai
 			const contact = await extractContactFromSocialBio(platform, profileUrl);
 			if (needEmail && !email && contact.email) email = contact.email;
 			if (needPhone && !phone && contact.phone) phone = contact.phone;
-			if ((!needEmail || email) && (!needPhone || phone)) break;
 		}
+	}
+
+	if (!satisfied() && biz) {
+		const newSocials = await searchSocialProfiles(biz, addr, lead);
+		for (const [platform, url] of Object.entries(newSocials)) {
+			if (satisfied()) break;
+			const contact = await extractContactFromSocialBio(platform, url);
+			if (needEmail && !email && contact.email) email = contact.email;
+			if (needPhone && !phone && contact.phone) phone = contact.phone;
+		}
+	}
+
+	if (!satisfied() && biz) {
+		const mentions = await searchContactMentions(biz, addr);
+		if (needEmail && !email && mentions.email) email = mentions.email;
+		if (needPhone && !phone && mentions.phone) phone = mentions.phone;
 	}
 
 	return { email, phone };
