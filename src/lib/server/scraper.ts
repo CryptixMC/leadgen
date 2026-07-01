@@ -12,7 +12,7 @@ import {
 const PLACES_SEARCH_URL = 'https://maps.googleapis.com/maps/api/place/textsearch/json';
 const PLACES_NEARBY_URL = 'https://maps.googleapis.com/maps/api/place/nearbysearch/json';
 const PLACES_DETAIL_URL = 'https://maps.googleapis.com/maps/api/place/details/json';
-const DETAIL_FIELDS = 'name,formatted_address,formatted_phone_number,website,rating,user_ratings_total,opening_hours,price_level,reviews';
+const DETAIL_FIELDS = 'name,formatted_address,formatted_phone_number,website,rating,user_ratings_total,opening_hours,price_level,reviews,business_status';
 
 // Place types that are not serviceable small businesses
 const NON_BUSINESS_TYPES = new Set([
@@ -48,33 +48,30 @@ const NON_BUSINESS_TYPES = new Set([
 	'intersection',
 	'postal_code',
 	'landmark',
-]);
-
-// Types that indicate a non-commercial place — filter these out in "all businesses" mode
-const ALL_BUSINESSES_EXCLUDE_TYPES = new Set([
-	'tourist_attraction',
-	'natural_feature',
-	'park',
-	'route',
-	'political',
-	'transit_station',
-	'train_station',
-	'bus_station',
-	'subway_station',
-	'airport',
-	'stadium',
-	'amusement_park',
-	'cemetery',
+	'school',
+	'primary_school',
+	'secondary_school',
+	'university',
+	'preschool',
+	'place_of_worship',
+	'church',
+	'mosque',
+	'synagogue',
+	'hindu_temple',
+	'hospital',
 	'city_hall',
 	'courthouse',
 	'embassy',
 	'fire_station',
-	'funeral_home',
-	'library',
 	'local_government_office',
 	'police',
-	'post_office'
+	'post_office',
 ]);
+
+// Types that indicate a non-commercial place — filter these out in "all businesses" mode.
+// Superset of NON_BUSINESS_TYPES plus a couple of gray-area types (real for-profit
+// businesses, but not useful in a broad "all businesses" sweep).
+const ALL_BUSINESSES_EXCLUDE_TYPES = new Set([...NON_BUSINESS_TYPES, 'library', 'funeral_home']);
 
 // Generic Google Places types that appear on almost every place regardless of
 // business type — skipped when picking a per-lead category label.
@@ -174,6 +171,12 @@ async function upsertPlace(place: Record<string, unknown>, apiKey: string): Prom
 		key: apiKey
 	});
 	const detail = (detailData.result as Record<string, unknown>) ?? {};
+
+	// Skip places that are closed — not a viable lead to contact right now
+	const businessStatus = detail.business_status as string | undefined;
+	if (businessStatus === 'CLOSED_PERMANENTLY' || businessStatus === 'CLOSED_TEMPORARILY') {
+		return false;
+	}
 
 	let website = (detail.website as string) || (place.website as string) || null;
 	// If the GBP "website" field is actually a social media profile, capture it properly
