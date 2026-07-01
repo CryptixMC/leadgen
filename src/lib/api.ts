@@ -5,6 +5,7 @@ const BASE = '/api';
 export interface Lead {
 	id: string;
 	business_name: string;
+	category: string | null;
 	address: string;
 	phone: string;
 	website_url: string | null;

@@ -76,6 +76,25 @@ const ALL_BUSINESSES_EXCLUDE_TYPES = new Set([
 	'post_office'
 ]);
 
+// Generic Google Places types that appear on almost every place regardless of
+// business type — skipped when picking a per-lead category label.
+const GENERIC_PLACE_TYPES = new Set([
+	'point_of_interest',
+	'establishment',
+	'premise',
+	'subpremise',
+	'geocode',
+]);
+
+function deriveCategory(types: string[]): string | null {
+	const first = types.find((t) => !GENERIC_PLACE_TYPES.has(t));
+	if (!first) return null;
+	return first
+		.split('_')
+		.map((w) => w[0].toUpperCase() + w.slice(1))
+		.join(' ');
+}
+
 export class Semaphore {
 	private queue: Array<() => void> = [];
 	constructor(private permits: number) {}
@@ -212,6 +231,7 @@ async function upsertPlace(place: Record<string, unknown>, apiKey: string): Prom
 	const now = new Date().toISOString();
 	const lead: Record<string, unknown> = {
 		business_name: businessName,
+		category: deriveCategory(types),
 		address,
 		phone: (detail.formatted_phone_number as string) || '',
 		website_url: website,
@@ -242,10 +262,12 @@ async function upsertPlace(place: Record<string, unknown>, apiKey: string): Prom
 		.maybeSingle();
 	if (existing.data) {
 		if (existing.data.hidden) return false;
-		await db.from('leads').update(lead).eq('google_place_id', placeId);
+		const { error: updateErr } = await db.from('leads').update(lead).eq('google_place_id', placeId);
+		if (updateErr) throw new Error(`Failed to update lead: ${updateErr.message}`);
 	} else {
 		lead.created_at = now;
-		await db.from('leads').insert(lead);
+		const { error: insertErr } = await db.from('leads').insert(lead);
+		if (insertErr) throw new Error(`Failed to insert lead: ${insertErr.message}`);
 	}
 	return true;
 }
@@ -272,6 +294,9 @@ export async function runScrape(
 		await sem.acquire();
 		try {
 			return await upsertPlace(place, apiKey);
+		} catch (err) {
+			console.error('upsertPlace failed:', err instanceof Error ? err.message : err);
+			return false;
 		} finally {
 			sem.release();
 		}

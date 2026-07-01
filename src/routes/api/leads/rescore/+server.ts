@@ -37,7 +37,8 @@ export const POST: RequestHandler = async ({ locals, url }) => {
 				enrichment.lead_score = score;
 				enrichment.priority = priority;
 				enrichment.last_updated = now;
-				await db.from('leads').update(enrichment).eq('id', lead.id);
+				const { error: updateErr } = await db.from('leads').update(enrichment).eq('id', lead.id);
+				if (updateErr) throw new Error(updateErr.message);
 				updated++;
 			} catch {
 				// continue
