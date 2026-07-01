@@ -118,6 +118,13 @@ export async function updateLead(
 		phone?: string;
 		email?: string;
 		website_url?: string;
+		owner_name?: string;
+		facebook_url?: string;
+		instagram_url?: string;
+		twitter_url?: string;
+		linkedin_url?: string;
+		tiktok_url?: string;
+		youtube_url?: string;
 	}
 ): Promise<Lead> {
 	const res = await fetch(`${BASE}/leads/${id}`, {

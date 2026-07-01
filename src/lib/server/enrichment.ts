@@ -514,7 +514,17 @@ const CONTACT_PAGE_KEYWORDS = [
 	'directions', 'office', 'branch'
 ];
 
+// Overall soft deadline for findContact, well under Vercel's maxDuration: 60 on the
+// find-contact route. Individual fetches get a realistic timeout (matching scrapeWebsite's
+// patience); the deadline instead gates which *stages* get to run, so a slow site trades
+// away later stages rather than a too-short per-fetch timeout crippling every stage equally.
+const FIND_CONTACT_BUDGET_MS = 50_000;
+const FIND_CONTACT_MIN_STAGE_MS = 8_000;
+
 export async function findContact(lead: Record<string, unknown>): Promise<{ email: string | null; phone: string | null }> {
+	const deadline = Date.now() + FIND_CONTACT_BUDGET_MS;
+	const timeLeft = () => deadline - Date.now();
+
 	const needEmail = !lead.email;
 	const needPhone = !lead.phone;
 	let email: string | null = null;
@@ -522,16 +532,16 @@ export async function findContact(lead: Record<string, unknown>): Promise<{ emai
 	const satisfied = () => (!needEmail || email) && (!needPhone || phone);
 
 	const websiteUrl = lead.website_url as string | null;
-	if (websiteUrl && !satisfied()) {
+	if (websiteUrl && !satisfied() && timeLeft() > FIND_CONTACT_MIN_STAGE_MS) {
 		try {
-			const { response: resp } = await fetchSsrfSafe(websiteUrl, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(4_000) });
+			const { response: resp } = await fetchSsrfSafe(websiteUrl, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(7_000) });
 			if (resp.ok) {
 				const $ = cheerioLoad(await resp.text());
 				const homeContact = extractContactInfo($);
 				if (needEmail && !email && homeContact.email) email = homeContact.email;
 				if (needPhone && !phone && homeContact.phone) phone = homeContact.phone;
 
-				if (!satisfied()) {
+				if (!satisfied() && timeLeft() > FIND_CONTACT_MIN_STAGE_MS) {
 					const baseUrl = new URL(websiteUrl).origin;
 					const allLinkUrls: string[] = [];
 					const subPageUrls: string[] = [];
@@ -557,11 +567,15 @@ export async function findContact(lead: Record<string, unknown>): Promise<{ emai
 					});
 
 					const crawlBatched = async (urlsToCrawl: string[]) => {
-						for (let i = 0; i < urlsToCrawl.length && !satisfied(); i += 8) {
-							const batch = urlsToCrawl.slice(i, i + 8);
+						for (
+							let i = 0;
+							i < urlsToCrawl.length && !satisfied() && timeLeft() > FIND_CONTACT_MIN_STAGE_MS;
+							i += 12
+						) {
+							const batch = urlsToCrawl.slice(i, i + 12);
 							const batchResults = await Promise.allSettled(
 								batch.map(async (subUrl) => {
-									const { response: subResp } = await fetchSsrfSafe(subUrl, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(4_000) });
+									const { response: subResp } = await fetchSsrfSafe(subUrl, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(7_000) });
 									if (!subResp.ok) return null;
 									return extractContactInfo(cheerioLoad(await subResp.text()));
 								})
@@ -580,7 +594,7 @@ export async function findContact(lead: Record<string, unknown>): Promise<{ emai
 					// Catch-all: if the targeted keyword/sitemap crawl still came up short,
 					// fall back to every other same-origin link found on the homepage —
 					// guarantees full one-hop coverage regardless of how pages are labeled.
-					if (!satisfied()) {
+					if (!satisfied() && timeLeft() > FIND_CONTACT_MIN_STAGE_MS) {
 						const tried = new Set([websiteUrl, ...targeted]);
 						const remaining = allLinkUrls.filter((u) => !tried.has(u)).slice(0, 20);
 						await crawlBatched(remaining);
@@ -595,7 +609,7 @@ export async function findContact(lead: Record<string, unknown>): Promise<{ emai
 	const biz = (lead.business_name as string) ?? '';
 	const addr = (lead.address as string) ?? '';
 
-	if (!satisfied()) {
+	if (!satisfied() && timeLeft() > FIND_CONTACT_MIN_STAGE_MS) {
 		const socialFields = ['instagram_url', 'facebook_url', 'twitter_url', 'tiktok_url', 'youtube_url', 'linkedin_url'];
 		const socialEntries = socialFields
 			.map((f) => ({ field: f, url: lead[f] as string | null }))
@@ -615,7 +629,7 @@ export async function findContact(lead: Record<string, unknown>): Promise<{ emai
 		}
 	}
 
-	if (!satisfied() && biz) {
+	if (!satisfied() && biz && timeLeft() > FIND_CONTACT_MIN_STAGE_MS) {
 		const newSocials = await searchSocialProfiles(biz, addr, lead);
 		await Promise.allSettled(
 			Object.entries(newSocials).map(async ([platform, url]) => {

@@ -56,7 +56,14 @@
 		address: '',
 		phone: '',
 		email: '',
-		website_url: ''
+		website_url: '',
+		owner_name: '',
+		facebook_url: '',
+		instagram_url: '',
+		twitter_url: '',
+		linkedin_url: '',
+		tiktok_url: '',
+		youtube_url: ''
 	});
 	let editSaving = $state(false);
 	let editError = $state('');
@@ -67,7 +74,14 @@
 			address: lead.address ?? '',
 			phone: lead.phone ?? '',
 			email: lead.email ?? '',
-			website_url: lead.website_url ?? ''
+			website_url: lead.website_url ?? '',
+			owner_name: lead.owner_name ?? '',
+			facebook_url: lead.facebook_url ?? '',
+			instagram_url: lead.instagram_url ?? '',
+			twitter_url: lead.twitter_url ?? '',
+			linkedin_url: lead.linkedin_url ?? '',
+			tiktok_url: lead.tiktok_url ?? '',
+			youtube_url: lead.youtube_url ?? ''
 		};
 		editError = '';
 		editModalOpen = true;
@@ -83,7 +97,14 @@
 				address: editForm.address.trim(),
 				phone: editForm.phone.trim(),
 				email: editForm.email.trim(),
-				website_url: editForm.website_url.trim()
+				website_url: editForm.website_url.trim(),
+				owner_name: editForm.owner_name.trim(),
+				facebook_url: editForm.facebook_url.trim(),
+				instagram_url: editForm.instagram_url.trim(),
+				twitter_url: editForm.twitter_url.trim(),
+				linkedin_url: editForm.linkedin_url.trim(),
+				tiktok_url: editForm.tiktok_url.trim(),
+				youtube_url: editForm.youtube_url.trim()
 			});
 			notes = lead.notes ?? '';
 			editModalOpen = false;
@@ -653,6 +674,41 @@
 					<div class="form-row">
 						<label for="edit-website">Website URL</label>
 						<input id="edit-website" type="text" bind:value={editForm.website_url} placeholder="https://example.com" />
+					</div>
+
+					<div class="form-row">
+						<label for="edit-owner-name">Owner / Contact Name</label>
+						<input id="edit-owner-name" type="text" bind:value={editForm.owner_name} placeholder="Jane Doe" />
+					</div>
+
+					<div class="form-row">
+						<label for="edit-facebook">Facebook URL</label>
+						<input id="edit-facebook" type="text" bind:value={editForm.facebook_url} placeholder="https://facebook.com/yourbusiness" />
+					</div>
+
+					<div class="form-row">
+						<label for="edit-instagram">Instagram URL</label>
+						<input id="edit-instagram" type="text" bind:value={editForm.instagram_url} placeholder="https://instagram.com/yourbusiness" />
+					</div>
+
+					<div class="form-row">
+						<label for="edit-twitter">Twitter/X URL</label>
+						<input id="edit-twitter" type="text" bind:value={editForm.twitter_url} placeholder="https://x.com/yourbusiness" />
+					</div>
+
+					<div class="form-row">
+						<label for="edit-linkedin">LinkedIn URL</label>
+						<input id="edit-linkedin" type="text" bind:value={editForm.linkedin_url} placeholder="https://linkedin.com/company/yourbusiness" />
+					</div>
+
+					<div class="form-row">
+						<label for="edit-tiktok">TikTok URL</label>
+						<input id="edit-tiktok" type="text" bind:value={editForm.tiktok_url} placeholder="https://tiktok.com/@yourbusiness" />
+					</div>
+
+					<div class="form-row">
+						<label for="edit-youtube">YouTube URL</label>
+						<input id="edit-youtube" type="text" bind:value={editForm.youtube_url} placeholder="https://youtube.com/@yourbusiness" />
 					</div>
 				</div>
 
