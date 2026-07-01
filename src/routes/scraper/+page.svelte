@@ -1,5 +1,9 @@
 <script lang="ts">
-	import { triggerScrape, rescoreLeads } from '$lib/api';
+	import { onDestroy, tick } from 'svelte';
+	import { triggerScrape, rescoreLeads, geocodeLocation } from '$lib/api';
+	import { generateCoveringGrid, polygonBounds, haversineKm, DEFAULT_CELL_RADIUS_M, MAX_GRID_CELLS, type LatLng } from '$lib/geo';
+
+	const JUMP_ZOOM = 16;
 
 	let allBusinesses = $state(false);
 	let category = $state('');
@@ -13,6 +17,115 @@
 	let rescoreLoading = $state(false);
 	let rescoreResult = $state<{ updated: number; total: number } | null>(null);
 	let rescoreError = $state('');
+
+	// Area (polygon) mode
+	let mode = $state<'text' | 'polygon'>('text');
+	let polygon = $state<LatLng[] | null>(null);
+	let mapContainer: HTMLDivElement | undefined = $state();
+	let mapInstance: any = null;
+	let L: any = null;
+	let drawnItemsLayer: any = null;
+	let drawControl: any = null;
+
+	let locationQuery = $state('');
+	let locating = $state(false);
+	let locationError = $state('');
+
+	const cellEstimate = $derived(
+		polygon && polygon.length >= 3 ? generateCoveringGrid(polygon, DEFAULT_CELL_RADIUS_M).length : 0
+	);
+	const areaTooLarge = $derived(cellEstimate > MAX_GRID_CELLS);
+	const areaSize = $derived.by(() => {
+		if (!polygon || polygon.length < 3) return null;
+		const { minLat, maxLat, minLng, maxLng } = polygonBounds(polygon);
+		const midLat = (minLat + maxLat) / 2;
+		const widthM = Math.round(haversineKm(midLat, minLng, midLat, maxLng) * 1000);
+		const heightM = Math.round(haversineKm(minLat, (minLng + maxLng) / 2, maxLat, (minLng + maxLng) / 2) * 1000);
+		return { widthM, heightM };
+	});
+
+	async function setMode(newMode: 'text' | 'polygon') {
+		mode = newMode;
+		if (newMode === 'polygon') {
+			await tick();
+			await initMap();
+		}
+	}
+
+	async function initMap() {
+		if (mapInstance || !mapContainer) return;
+		L = (await import('leaflet')).default;
+		await import('leaflet-draw');
+		mapInstance = L.map(mapContainer).setView([49.8, -97.1], 12);
+		L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+			attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+		}).addTo(mapInstance);
+
+		drawnItemsLayer = new L.FeatureGroup().addTo(mapInstance);
+		drawControl = new L.Control.Draw({
+			draw: {
+				polygon: true,
+				rectangle: true,
+				marker: false,
+				circle: false,
+				circlemarker: false,
+				polyline: false
+			},
+			edit: { featureGroup: drawnItemsLayer }
+		});
+		mapInstance.addControl(drawControl);
+		mapInstance.on(L.Draw.Event.CREATED, handleDrawCreated);
+	}
+
+	function handleDrawCreated(e: any) {
+		drawnItemsLayer.clearLayers();
+		drawnItemsLayer.addLayer(e.layer);
+		const latlngs = e.layer.getLatLngs()[0] as Array<{ lat: number; lng: number }>;
+		polygon = latlngs.map((p) => [p.lat, p.lng] as LatLng);
+	}
+
+	function clearPolygon() {
+		if (drawnItemsLayer) drawnItemsLayer.clearLayers();
+		polygon = null;
+	}
+
+	async function handleLocationSearch(e: Event) {
+		e.preventDefault();
+		if (!locationQuery.trim() || !mapInstance) return;
+		locating = true;
+		locationError = '';
+		try {
+			const loc = await geocodeLocation(locationQuery.trim());
+			if (!loc) {
+				locationError = 'Location not found — try a more specific address or neighborhood.';
+				return;
+			}
+			mapInstance.setView([loc.lat, loc.lng], JUMP_ZOOM);
+		} catch (err) {
+			locationError = err instanceof Error ? err.message : 'Location search failed';
+		} finally {
+			locating = false;
+		}
+	}
+
+	function handleUseMyLocation() {
+		if (!mapInstance || !navigator.geolocation) return;
+		locating = true;
+		locationError = '';
+		navigator.geolocation.getCurrentPosition(
+			(pos) => {
+				mapInstance.setView([pos.coords.latitude, pos.coords.longitude], JUMP_ZOOM);
+				locating = false;
+			},
+			() => {
+				locationError = 'Could not get your location — check browser permissions.';
+				locating = false;
+			},
+			{ timeout: 10000 }
+		);
+	}
+
+	onDestroy(() => mapInstance?.remove());
 
 	async function handleRescore() {
 		rescoreLoading = true;
@@ -30,13 +143,17 @@
 	async function handleSubmit(e: Event) {
 		e.preventDefault();
 		if (!allBusinesses && !category.trim()) return;
+		if (mode === 'polygon' && (!polygon || polygon.length < 3 || areaTooLarge)) return;
 
 		loading = true;
 		error = '';
 		result = null;
 
 		try {
-			result = await triggerScrape(allBusinesses ? '' : category.trim(), city.trim(), target, neighborhood.trim() || undefined);
+			result =
+				mode === 'polygon'
+					? await triggerScrape(allBusinesses ? '' : category.trim(), '', target, undefined, polygon!)
+					: await triggerScrape(allBusinesses ? '' : category.trim(), city.trim(), target, neighborhood.trim() || undefined);
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Scrape failed';
 		} finally {
@@ -47,6 +164,10 @@
 
 <svelte:head>
 	<title>Scraper — LeadGen</title>
+	{#if mode === 'polygon'}
+		<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+		<link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
+	{/if}
 </svelte:head>
 
 <main>
@@ -77,28 +198,87 @@
 		</div>
 
 		<div class="field">
-			<label for="city">City</label>
-			<input
-				id="city"
-				type="text"
-				bind:value={city}
-				placeholder="e.g. Winnipeg MB"
-				required
-				disabled={loading}
-			/>
+			<label for="location-mode">Location</label>
+			<div class="mode-toggle" id="location-mode">
+				<button
+					type="button"
+					class="mode-btn"
+					class:active={mode === 'text'}
+					disabled={loading}
+					onclick={() => setMode('text')}
+				>City / Neighborhood</button>
+				<button
+					type="button"
+					class="mode-btn"
+					class:active={mode === 'polygon'}
+					disabled={loading}
+					onclick={() => setMode('polygon')}
+				>Draw Area on Map</button>
+			</div>
 		</div>
 
-		<div class="field">
-			<label for="neighborhood">Neighborhood <span class="optional">(optional)</span></label>
-			<input
-				id="neighborhood"
-				type="text"
-				bind:value={neighborhood}
-				placeholder="e.g. Exchange District, St. Vital"
-				disabled={loading}
-			/>
-			<p class="field-hint">Narrows the search to a specific area — great for D2D walking routes.</p>
-		</div>
+		{#if mode === 'text'}
+			<div class="field">
+				<label for="city">City</label>
+				<input
+					id="city"
+					type="text"
+					bind:value={city}
+					placeholder="e.g. Winnipeg MB"
+					required={mode === 'text'}
+					disabled={loading}
+				/>
+			</div>
+
+			<div class="field">
+				<label for="neighborhood">Neighborhood <span class="optional">(optional)</span></label>
+				<input
+					id="neighborhood"
+					type="text"
+					bind:value={neighborhood}
+					placeholder="e.g. Exchange District, St. Vital"
+					disabled={loading}
+				/>
+				<p class="field-hint">Narrows the search to a specific area — great for D2D walking routes.</p>
+			</div>
+		{:else}
+			<div class="field">
+				<p class="field-hint">Find your target area first, then draw a polygon or rectangle around the block(s) you want to canvass. Only businesses inside the shape are pulled in.</p>
+				<div class="location-search">
+					<input
+						type="text"
+						bind:value={locationQuery}
+						placeholder="Search an address or neighborhood…"
+						disabled={loading || locating}
+						onkeydown={(e) => { if (e.key === 'Enter') handleLocationSearch(e); }}
+					/>
+					<button type="button" class="location-btn" onclick={handleLocationSearch} disabled={loading || locating || !locationQuery.trim()}>
+						{locating ? '…' : 'Go'}
+					</button>
+					<button type="button" class="location-btn" onclick={handleUseMyLocation} disabled={loading || locating} title="Use my location">
+						📍
+					</button>
+				</div>
+				{#if locationError}
+					<p class="field-hint error-hint">{locationError}</p>
+				{/if}
+				<div bind:this={mapContainer} class="draw-map"></div>
+				<div class="polygon-status">
+					{#if polygon}
+						<span>
+							Area selected — ~{cellEstimate} search cell{cellEstimate === 1 ? '' : 's'}
+							{#if areaSize}· ≈{areaSize.widthM}m × {areaSize.heightM}m{/if}
+						</span>
+						<button type="button" class="clear-polygon-btn" onclick={clearPolygon} disabled={loading}>Clear area</button>
+					{:else}
+						<span>No area drawn yet.</span>
+					{/if}
+				</div>
+				{#if areaTooLarge}
+					<p class="field-hint error-hint">Area too large (~{cellEstimate} search cells, max {MAX_GRID_CELLS}) — draw a smaller area or clear and try again.</p>
+				{/if}
+			</div>
+		{/if}
 
 		<div class="field">
 			<label for="target">Target leads</label>
@@ -113,7 +293,11 @@
 			/>
 		</div>
 
-		<button type="submit" class="submit-btn" disabled={loading || (!allBusinesses && !category.trim())}>
+		<button
+			type="submit"
+			class="submit-btn"
+			disabled={loading || (!allBusinesses && !category.trim()) || (mode === 'polygon' && (!polygon || polygon.length < 3 || areaTooLarge))}
+		>
 			{loading ? 'Scraping…' : 'Run Scrape'}
 		</button>
 	</form>
@@ -121,7 +305,11 @@
 	{#if loading}
 		<div class="status-card info">
 			<span class="spinner"></span>
-			Scraping up to <strong>{target}</strong> leads for <strong>{category}</strong> in {neighborhood.trim() ? `<strong>${neighborhood}</strong>, ` : ''}<strong>{city}</strong>…
+			{#if mode === 'polygon'}
+				Scraping up to <strong>{target}</strong> leads for <strong>{category}</strong> in the drawn area…
+			{:else}
+				Scraping up to <strong>{target}</strong> leads for <strong>{category}</strong> in {neighborhood.trim() ? `<strong>${neighborhood}</strong>, ` : ''}<strong>{city}</strong>…
+			{/if}
 		</div>
 	{/if}
 
@@ -134,6 +322,9 @@
 			<p class="result-detail">
 				Category: <strong>{result.category}</strong> · City: <strong>{result.city}</strong> · Pages fetched: <strong>{result.pages_fetched}</strong>
 			</p>
+			{#if result.upserted === 0}
+				<p class="result-detail">No new results — try a different area/category, or these may already be in your leads list.</p>
+			{/if}
 			<a href="/" class="view-link">View leads →</a>
 		</div>
 	{/if}
@@ -288,6 +479,103 @@
 		opacity: 0.5;
 	}
 
+	.mode-toggle {
+		display: flex;
+		gap: 0.5rem;
+	}
+
+	.mode-btn {
+		flex: 1;
+		background: var(--bg-surface);
+		border: 1px solid var(--border-subtle);
+		color: var(--text-muted);
+		padding: 0.5rem 0.75rem;
+		border-radius: var(--radius-sm);
+		font-size: 0.8rem;
+		font-weight: 500;
+		cursor: pointer;
+		transition: border-color var(--dur-fast), color var(--dur-fast), background var(--dur-fast);
+	}
+
+	.mode-btn.active {
+		background: rgba(124, 58, 237, 0.15);
+		border-color: #7C3AED;
+		color: #C4B5FD;
+	}
+
+	.mode-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.location-search {
+		display: flex;
+		gap: 0.4rem;
+	}
+
+	.location-search input {
+		flex: 1;
+	}
+
+	.location-btn {
+		background: var(--bg-surface);
+		border: 1px solid var(--border-subtle);
+		color: var(--text-muted);
+		padding: 0.55rem 0.85rem;
+		border-radius: var(--radius-sm);
+		font-size: 0.85rem;
+		cursor: pointer;
+		white-space: nowrap;
+		transition: border-color var(--dur-fast), color var(--dur-fast);
+	}
+
+	.location-btn:hover:not(:disabled) {
+		border-color: var(--accent-primary);
+		color: var(--text-primary);
+	}
+
+	.location-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.error-hint {
+		color: #f87171;
+		opacity: 0.9;
+	}
+
+	.draw-map {
+		width: 100%;
+		height: 280px;
+		border-radius: var(--radius-sm);
+		border: 1px solid var(--border-subtle);
+		overflow: hidden;
+	}
+
+	.polygon-status {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+		font-size: 0.8rem;
+		color: var(--text-muted);
+	}
+
+	.clear-polygon-btn {
+		background: transparent;
+		border: 1px solid var(--border-subtle);
+		color: var(--text-muted);
+		padding: 0.3rem 0.75rem;
+		border-radius: var(--radius-pill);
+		font-size: 0.75rem;
+		cursor: pointer;
+	}
+
+	.clear-polygon-btn:hover:not(:disabled) {
+		border-color: #f87171;
+		color: #f87171;
+	}
+
 	.submit-btn {
 		width: 100%;
 		background: var(--gradient-primary);
@@ -411,6 +699,14 @@
 		}
 
 		input {
+			min-height: 44px;
+		}
+
+		.mode-btn {
+			min-height: 44px;
+		}
+
+		.location-btn {
 			min-height: 44px;
 		}
 	}
