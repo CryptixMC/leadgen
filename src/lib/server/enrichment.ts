@@ -476,10 +476,14 @@ async function extractContactFromSocialBio(
 }
 
 const CONTACT_PAGE_KEYWORDS = [
-	'contact', 'about', 'team', 'staff', 'location', 'connect', 'reach', 'get-in-touch',
+	'contact', 'about', 'home', 'team', 'staff', 'location', 'connect', 'reach', 'get-in-touch',
 	'support', 'help', 'careers', 'impressum', 'legal', 'privacy', 'imprint', 'faq',
 	'directions', 'office', 'branch'
 ];
+
+// Common sitemap locations across plain sites, Yoast/RankMath-style WordPress SEO
+// plugins, and WordPress core's built-in sitemap (since 5.5) — tried in order.
+const SITEMAP_CANDIDATE_PATHS = ['/sitemap.xml', '/sitemap_index.xml', '/wp-sitemap.xml'];
 
 // Crawl sitemap.xml (following one level of sitemap-index nesting, or robots.txt's
 // Sitemap: directive as a fallback) to surface pages that aren't linked from the nav/footer.
@@ -512,7 +516,10 @@ async function discoverSitemapUrls(baseUrl: string): Promise<string[]> {
 		}
 	}
 
-	await collectFromXml(`${baseUrl}/sitemap.xml`, 0);
+	for (const path of SITEMAP_CANDIDATE_PATHS) {
+		if (urls.length) break;
+		await collectFromXml(`${baseUrl}${path}`, 0);
+	}
 
 	if (!urls.length) {
 		try {
@@ -612,19 +619,27 @@ export async function findContact(lead: Record<string, unknown>): Promise<{ emai
 
 				if (!satisfied()) {
 					const baseUrl = new URL(websiteUrl).origin;
+					const allLinkUrls: string[] = [];
 					const subPageUrls: string[] = [];
 
+					// Match on the link's URL *or* its visible label — nav items are
+					// sometimes mislabeled (e.g. an "About" menu entry repointed at a
+					// page whose slug is actually "home" after a site reorg).
 					$('a[href]').each((_, el) => {
 						const href = $(el).attr('href') ?? '';
-						const lower = href.toLowerCase();
-						if (CONTACT_PAGE_KEYWORDS.some((kw) => lower.includes(kw))) {
-							try {
-								const full = new URL(href, baseUrl).toString();
-								if (full.startsWith(baseUrl) && !subPageUrls.includes(full)) subPageUrls.push(full);
-							} catch {
-								// ignore malformed href
-							}
+						let full: string;
+						try {
+							full = new URL(href, baseUrl).toString();
+						} catch {
+							return;
 						}
+						if (!full.startsWith(baseUrl)) return;
+						if (!allLinkUrls.includes(full)) allLinkUrls.push(full);
+
+						const lower = href.toLowerCase();
+						const label = $(el).text().trim().toLowerCase();
+						const isKeywordMatch = CONTACT_PAGE_KEYWORDS.some((kw) => lower.includes(kw) || label.includes(kw));
+						if (isKeywordMatch && !subPageUrls.includes(full)) subPageUrls.push(full);
 					});
 
 					const sitemapUrls = await discoverSitemapUrls(baseUrl);
@@ -633,21 +648,34 @@ export async function findContact(lead: Record<string, unknown>): Promise<{ emai
 						if (!subPageUrls.includes(url)) subPageUrls.push(url);
 					}
 
-					const capped = subPageUrls.slice(0, 15);
-					for (let i = 0; i < capped.length && !satisfied(); i += 8) {
-						const batch = capped.slice(i, i + 8);
-						const batchResults = await Promise.allSettled(
-							batch.map(async (subUrl) => {
-								const subResp = await fetch(subUrl, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(8_000) });
-								if (!subResp.ok) return null;
-								return extractContactInfo(cheerioLoad(await subResp.text()));
-							})
-						);
-						for (const r of batchResults) {
-							if (r.status !== 'fulfilled' || !r.value) continue;
-							if (needEmail && !email && r.value.email) email = r.value.email;
-							if (needPhone && !phone && r.value.phone) phone = r.value.phone;
+					const crawlBatched = async (urlsToCrawl: string[]) => {
+						for (let i = 0; i < urlsToCrawl.length && !satisfied(); i += 8) {
+							const batch = urlsToCrawl.slice(i, i + 8);
+							const batchResults = await Promise.allSettled(
+								batch.map(async (subUrl) => {
+									const subResp = await fetch(subUrl, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(8_000) });
+									if (!subResp.ok) return null;
+									return extractContactInfo(cheerioLoad(await subResp.text()));
+								})
+							);
+							for (const r of batchResults) {
+								if (r.status !== 'fulfilled' || !r.value) continue;
+								if (needEmail && !email && r.value.email) email = r.value.email;
+								if (needPhone && !phone && r.value.phone) phone = r.value.phone;
+							}
 						}
+					};
+
+					const targeted = subPageUrls.slice(0, 15);
+					await crawlBatched(targeted);
+
+					// Catch-all: if the targeted keyword/sitemap crawl still came up short,
+					// fall back to every other same-origin link found on the homepage —
+					// guarantees full one-hop coverage regardless of how pages are labeled.
+					if (!satisfied()) {
+						const tried = new Set([websiteUrl, ...targeted]);
+						const remaining = allLinkUrls.filter((u) => !tried.has(u)).slice(0, 20);
+						await crawlBatched(remaining);
 					}
 				}
 			}
