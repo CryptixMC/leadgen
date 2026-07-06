@@ -43,6 +43,9 @@ leadgen/
 │   │   ├── index.ts                # barrel export
 │   │   ├── assets/                 # static images/icons
 │   │   ├── components/             # shared Svelte components
+│   │   │   ├── LeadsTable.svelte   # List view — table + mobile card list, sorting, checkboxes
+│   │   │   ├── LeadsKanban.svelte  # Kanban view — drag-and-drop status board
+│   │   │   └── LeadsMap.svelte     # Map view — Leaflet pins, route planning, lasso/click select
 │   │   └── server/                 # server-only modules (never imported client-side)
 │   │       ├── auth.ts             # JWT validation helper
 │   │       ├── db.ts               # Supabase admin client singleton
@@ -55,7 +58,8 @@ leadgen/
 │   ├── routes/
 │   │   ├── +layout.server.ts       # auth guard — redirects to /login if no session
 │   │   ├── +layout.svelte          # nav + global styles
-│   │   ├── +page.svelte            # lead dashboard (table, filters, batch delete, create)
+│   │   ├── +page.svelte            # Leads hub — shared filters/selection/bulk actions, renders
+│   │   │                           # List/Kanban/Map view via `?view=` (list|kanban|map)
 │   │   ├── +page.ts                # load leads on mount
 │   │   ├── api/                    # SvelteKit API routes (server-only)
 │   │   │   ├── health/             # GET /api/health — no auth required
@@ -70,9 +74,9 @@ leadgen/
 │   │   │   └── scrapes/            # POST /api/scrapes — trigger Places scrape
 │   │   ├── leads/[id]/             # lead detail page, status/notes/edit-lead editing
 │   │   ├── clients/                # clients list + individual client pages
-│   │   ├── map/                    # Leaflet map of geocoded leads
+│   │   ├── map/                    # redirects to /?view=map (old bookmark compatibility)
 │   │   ├── analytics/              # dashboard stats + charts
-│   │   ├── pipeline/               # Kanban / sales pipeline view
+│   │   ├── pipeline/               # redirects to /?view=kanban (old bookmark compatibility)
 │   │   ├── scraper/                # UI to trigger scrapes
 │   │   └── login/                  # Supabase email/password sign-in
 │   └── app.html                    # root HTML template

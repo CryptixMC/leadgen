@@ -13,7 +13,7 @@
 
 	function handleDemo() {
 		enterDemo();
-		goto('/pipeline');
+		goto('/?view=kanban');
 	}
 </script>
 
