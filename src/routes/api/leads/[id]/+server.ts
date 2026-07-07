@@ -1,10 +1,13 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { db } from '$lib/server/db';
 import { requireAuth } from '$lib/server/auth';
-import { calculateScore } from '$lib/server/scoring';
-import { normalizeWebsiteUrl } from '$lib/server/utils';
 import { DEMO_LEADS } from '$lib/demo/data';
+import { getLead, updateLead, deleteLeads, LeadOpError } from '$lib/server/leadOperations';
+
+function handleOpError(e: unknown): never {
+	if (e instanceof LeadOpError) throw error(e.status, e.message);
+	throw error(500, e instanceof Error ? e.message : 'Request failed');
+}
 
 export const GET: RequestHandler = async ({ locals, params }) => {
 	if (locals.demo) {
@@ -14,13 +17,11 @@ export const GET: RequestHandler = async ({ locals, params }) => {
 	}
 
 	requireAuth(locals);
-	const { data, error: err } = await db
-		.from('leads')
-		.select('*')
-		.eq('id', params.id)
-		.single();
-	if (err || !data) throw error(404, 'Lead not found');
-	return json(data);
+	try {
+		return json(await getLead(params.id));
+	} catch (e) {
+		handleOpError(e);
+	}
 };
 
 export const PATCH: RequestHandler = async ({ locals, params, request }) => {
@@ -31,73 +32,22 @@ export const PATCH: RequestHandler = async ({ locals, params, request }) => {
 	}
 
 	requireAuth(locals);
-	const payload = await request.json();
-	const updateData: Record<string, unknown> = {};
-	if (payload.status !== undefined) updateData.status = payload.status;
-	if (payload.notes !== undefined) updateData.notes = payload.notes;
-	if (payload.hidden !== undefined) updateData.hidden = Boolean(payload.hidden);
-	if (payload.business_name !== undefined) {
-		const businessName = String(payload.business_name).trim();
-		if (!businessName) throw error(400, 'Business name is required');
-		updateData.business_name = businessName;
+	try {
+		const payload = await request.json();
+		return json(await updateLead(params.id, payload));
+	} catch (e) {
+		handleOpError(e);
 	}
-	if (payload.address !== undefined) updateData.address = payload.address || null;
-	if (payload.phone !== undefined) updateData.phone = payload.phone || null;
-	if (payload.email !== undefined) updateData.email = payload.email || null;
-	if (payload.website_url !== undefined) {
-		let websiteUrl: string | null;
-		try {
-			websiteUrl = normalizeWebsiteUrl(payload.website_url);
-		} catch (e) {
-			throw error(400, e instanceof Error ? e.message : 'Invalid website URL');
-		}
-		updateData.website_url = websiteUrl;
-		updateData.has_website = Boolean(websiteUrl);
-		updateData.has_https = websiteUrl != null && websiteUrl.startsWith('https://');
-	}
-	if (!Object.keys(updateData).length) throw error(400, 'No updatable fields provided');
-	updateData.last_updated = new Date().toISOString();
-
-	if (updateData.website_url !== undefined || updateData.email !== undefined) {
-		const { data: existing } = await db.from('leads').select('*').eq('id', params.id).single();
-		if (existing) {
-			const [score, priority] = calculateScore({ ...existing, ...updateData });
-			updateData.lead_score = score;
-			updateData.priority = priority;
-		}
-	}
-
-	const { data, error: err } = await db
-		.from('leads')
-		.update(updateData)
-		.eq('id', params.id)
-		.select()
-		.single();
-	if (err || !data) throw error(404, 'Lead not found');
-
-	if (payload.status === 'closed_won') {
-		const { data: existing } = await db
-			.from('clients')
-			.select('id')
-			.eq('lead_id', params.id)
-			.maybeSingle();
-		if (!existing) {
-			await db.from('clients').insert({
-				lead_id: data.id,
-				business_name: data.business_name,
-				phone: data.phone ?? null,
-				address: data.address ?? null
-			});
-		}
-	}
-
-	return json(data);
 };
 
 export const DELETE: RequestHandler = async ({ locals, params }) => {
 	if (locals.demo) return new Response(null, { status: 204 });
 
 	requireAuth(locals);
-	await db.from('leads').delete().eq('id', params.id);
+	try {
+		await deleteLeads([params.id]);
+	} catch (e) {
+		handleOpError(e);
+	}
 	return new Response(null, { status: 204 });
 };

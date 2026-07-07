@@ -1,10 +1,14 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { db } from '$lib/server/db';
 import { requireAuth } from '$lib/server/auth';
-import { calculateScore } from '$lib/server/scoring';
-import { normalizeWebsiteUrl } from '$lib/server/utils';
 import { DEMO_LEADS } from '$lib/demo/data';
+import { listLeads, createLead, deleteLeads, LeadOpError } from '$lib/server/leadOperations';
+import { db } from '$lib/server/db';
+
+function handleOpError(e: unknown): never {
+	if (e instanceof LeadOpError) throw error(e.status, e.message);
+	throw error(500, e instanceof Error ? e.message : 'Request failed');
+}
 
 export const GET: RequestHandler = async ({ locals, url }) => {
 	if (locals.demo) {
@@ -17,61 +21,29 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 	}
 
 	requireAuth(locals);
-	let query = db.from('leads').select('*').order('lead_score', { ascending: false });
-	const status = url.searchParams.get('status');
-	const priority = url.searchParams.get('priority');
-	const includeHidden = url.searchParams.get('include_hidden') === 'true';
-	if (status) query = query.eq('status', status);
-	if (priority) query = query.eq('priority', priority);
-	if (!includeHidden) query = query.eq('hidden', false);
-	const { data, error: err } = await query;
-	if (err) throw error(500, err.message);
-	return json(data ?? []);
+	try {
+		const leads = await listLeads({
+			status: url.searchParams.get('status') ?? undefined,
+			priority: url.searchParams.get('priority') ?? undefined,
+			includeHidden: url.searchParams.get('include_hidden') === 'true'
+		});
+		return json(leads);
+	} catch (e) {
+		handleOpError(e);
+	}
 };
 
 export const POST: RequestHandler = async ({ locals, request }) => {
 	if (locals.demo) return json({ ok: true }, { status: 201 });
 
 	requireAuth(locals);
-	const payload = await request.json();
-	const now = new Date().toISOString();
-
-	const businessName = String(payload.business_name ?? '').trim();
-	if (!businessName) throw error(400, 'Business name is required');
-
-	let websiteUrl: string | null;
 	try {
-		websiteUrl = normalizeWebsiteUrl(payload.website_url);
+		const payload = await request.json();
+		const lead = await createLead(payload);
+		return json(lead, { status: 201 });
 	} catch (e) {
-		throw error(400, e instanceof Error ? e.message : 'Invalid website URL');
+		handleOpError(e);
 	}
-	const hasWebsite = Boolean(websiteUrl);
-	const hasHttps = hasWebsite && String(websiteUrl).startsWith('https://');
-
-	const lead: Record<string, unknown> = {
-		business_name: businessName,
-		address: payload.address ?? null,
-		phone: payload.phone ?? null,
-		website_url: websiteUrl,
-		email: payload.email ?? null,
-		google_rating: payload.google_rating ?? 0,
-		review_count: payload.review_count ?? 0,
-		notes: payload.notes ?? null,
-		google_place_id: `manual_${crypto.randomUUID()}`,
-		has_website: hasWebsite,
-		has_https: hasHttps,
-		has_gbp: false,
-		status: 'cold',
-		created_at: now,
-		last_updated: now
-	};
-	const [score, priority] = calculateScore(lead);
-	lead.lead_score = score;
-	lead.priority = priority;
-
-	const { data, error: err } = await db.from('leads').insert(lead).select().single();
-	if (err) throw error(500, err.message);
-	return json(data, { status: 201 });
 };
 
 export const PATCH: RequestHandler = async ({ locals, request }) => {
@@ -93,9 +65,11 @@ export const DELETE: RequestHandler = async ({ locals, request }) => {
 	if (locals.demo) return json({ ok: true });
 
 	requireAuth(locals);
-	const { ids } = await request.json();
-	if (!ids?.length) throw error(400, 'No IDs provided');
-	const { error: err } = await db.from('leads').delete().in('id', ids);
-	if (err) throw error(500, err.message);
-	return json({ deleted: ids.length });
+	try {
+		const { ids } = await request.json();
+		const result = await deleteLeads(ids);
+		return json(result);
+	} catch (e) {
+		handleOpError(e);
+	}
 };
