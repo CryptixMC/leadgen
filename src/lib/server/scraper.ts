@@ -354,7 +354,12 @@ export async function runScrape(
 	function isCommercialPlace(place: Record<string, unknown>): boolean {
 		if (!allBusinesses) return true;
 		const types = (place.types as string[]) ?? [];
-		return !types.some((t) => ALL_BUSINESSES_EXCLUDE_TYPES.has(t));
+		if (types.some((t) => ALL_BUSINESSES_EXCLUDE_TYPES.has(t))) return false;
+		// Broad "all businesses" sweeps otherwise pick up memorials, monuments,
+		// plaques, etc. that Google doesn't tag with any specific type — only
+		// generic ones like point_of_interest/establishment. Requiring at least
+		// one non-generic type filters those out without guessing from the name.
+		return types.some((t) => !GENERIC_PLACE_TYPES.has(t));
 	}
 
 	// Build the text search query — neighborhood-scoped if provided
@@ -483,7 +488,12 @@ export async function runScrapePolygon(
 	function isCommercialPlace(place: Record<string, unknown>): boolean {
 		if (!allBusinesses) return true;
 		const types = (place.types as string[]) ?? [];
-		return !types.some((t) => ALL_BUSINESSES_EXCLUDE_TYPES.has(t));
+		if (types.some((t) => ALL_BUSINESSES_EXCLUDE_TYPES.has(t))) return false;
+		// Broad "all businesses" sweeps otherwise pick up memorials, monuments,
+		// plaques, etc. that Google doesn't tag with any specific type — only
+		// generic ones like point_of_interest/establishment. Requiring at least
+		// one non-generic type filters those out without guessing from the name.
+		return types.some((t) => !GENERIC_PLACE_TYPES.has(t));
 	}
 
 	const upsertSafe = async (place: Record<string, unknown>): Promise<UpsertResult> => {
