@@ -2,6 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import type { Lead } from '$lib/api';
 	import { pointInPolygon, haversineKm, type LatLng } from '$lib/geo';
+	import 'leaflet/dist/leaflet.css';
 
 	let {
 		leads,
@@ -33,19 +34,29 @@
 	let routeStops = $state<Lead[]>([]);
 	let routePolyline: any = null;
 
-	// Select mode state
-	let selectMode = $state(false);
+	// Freeform lasso drawing state (gesture-driven, no mode toggle)
+	let drawingPolygon: LatLng[] = [];
+	let vertexMarkersLayer: any = null;
+	let previewShapeLayer: any = null;
+	let rectPreviewLayer: any = null;
 
-	// Draw-area mode state
-	let drawMode = $state(false);
-	let drawnPolygon = $state<LatLng[] | null>(null);
-	let drawnItemsLayer: any = null;
-	let drawControl: any = null;
+	// Double-click / drag gesture bookkeeping
+	const DOUBLE_CLICK_MS = 400;
+	const DOUBLE_CLICK_PX = 20;
+	const DRAG_THRESHOLD_PX = 8;
+	let lastMouseDownAt = 0;
+	let lastMouseDownPoint: any = null;
+	let secondPressActive = false;
+	let secondPressLatLng: LatLng | null = null;
+	let secondPressContainerPoint: any = null;
+	let isDraggingRect = false;
+	let vertexClickTimer: ReturnType<typeof setTimeout> | null = null;
 
 	let mapContainer: HTMLDivElement;
 	let mapInstance: any = null;
 	let L: any = null;
 	let markersLayer: any = null;
+	let resizeObserver: ResizeObserver | null = null;
 
 	const withCoords = $derived(leads.filter((l) => l.latitude !== null && l.longitude !== null));
 	const withoutCoords = $derived(leads.filter((l) => l.latitude === null || l.longitude === null));
@@ -119,66 +130,165 @@
 	function clearRoute() {
 		routeStops = [];
 		if (routePolyline) { routePolyline.remove(); routePolyline = null; }
-		clearDrawnPolygon();
 		renderMarkers();
 	}
 
 	function toggleRouteMode() {
 		routeMode = !routeMode;
-		if (routeMode && selectMode) {
-			selectMode = false;
-		}
+		cancelDrawing();
 		if (!routeMode) clearRoute();
 		else renderMarkers();
 	}
 
-	function toggleSelectMode() {
-		selectMode = !selectMode;
-		if (selectMode && routeMode) {
-			routeMode = false;
-			clearRoute();
-		}
-		renderMarkers();
+	function cancelDrawing() {
+		drawingPolygon = [];
+		if (vertexMarkersLayer) vertexMarkersLayer.clearLayers();
+		if (previewShapeLayer) { previewShapeLayer.remove(); previewShapeLayer = null; }
+		if (rectPreviewLayer) { rectPreviewLayer.remove(); rectPreviewLayer = null; }
+		if (vertexClickTimer) { clearTimeout(vertexClickTimer); vertexClickTimer = null; }
 	}
 
-	function clearDrawnPolygon() {
-		if (drawnItemsLayer) drawnItemsLayer.clearLayers();
-		drawnPolygon = null;
-	}
-
-	function toggleDrawMode() {
-		drawMode = !drawMode;
-		if (!mapInstance || !L || !drawControl) return;
-		if (drawMode) {
-			mapInstance.addControl(drawControl);
-		} else {
-			mapInstance.removeControl(drawControl);
-		}
-	}
-
-	function applyPolygonSelection() {
-		if (!drawnPolygon) return;
-		const enclosed = withCoords.filter((l) =>
-			pointInPolygon(l.latitude!, l.longitude!, drawnPolygon!)
-		);
-		if (selectMode) {
-			onSelectMany(enclosed.map((l) => l.id));
-		} else {
+	function applyEnclosedSelection(enclosed: Lead[]) {
+		if (routeMode) {
 			routeStops = enclosed;
-			routeMode = true;
 			drawRoutePolyline();
+			renderMarkers();
+		} else {
+			onSelectMany(enclosed.map((l) => l.id));
 		}
-		drawMode = false;
-		if (mapInstance && drawControl) mapInstance.removeControl(drawControl);
-		renderMarkers();
 	}
 
-	function handlePolygonCreated(e: any) {
-		if (drawnItemsLayer) drawnItemsLayer.clearLayers();
-		drawnItemsLayer.addLayer(e.layer);
-		const latlngs = e.layer.getLatLngs()[0] as Array<{ lat: number; lng: number }>;
-		drawnPolygon = latlngs.map((p) => [p.lat, p.lng] as LatLng);
-		applyPolygonSelection();
+	function renderDrawingPreview() {
+		if (!mapInstance || !L) return;
+		if (vertexMarkersLayer) vertexMarkersLayer.clearLayers();
+		else vertexMarkersLayer = L.layerGroup().addTo(mapInstance);
+
+		if (previewShapeLayer) { previewShapeLayer.remove(); previewShapeLayer = null; }
+		if (drawingPolygon.length >= 2) {
+			previewShapeLayer = L.polyline(drawingPolygon, {
+				color: '#2DC653',
+				weight: 2,
+				dashArray: '6 4'
+			}).addTo(mapInstance);
+		}
+
+		drawingPolygon.forEach((latlng, i) => {
+			const isFirst = i === 0;
+			const vertexMarker = L.circleMarker(latlng, {
+				radius: isFirst ? 7 : 5,
+				color: isFirst ? '#F0ABFC' : '#86efac',
+				fillColor: isFirst ? '#D946EF' : '#2DC653',
+				fillOpacity: 1,
+				weight: 2
+			});
+			vertexMarker.on('mousedown', (e: any) => L.DomEvent.stopPropagation(e));
+			vertexMarker.on('click', (e: any) => {
+				L.DomEvent.stopPropagation(e);
+				if (vertexClickTimer) return;
+				vertexClickTimer = setTimeout(() => {
+					vertexClickTimer = null;
+					removeVertex(i);
+				}, 250);
+			});
+			if (isFirst) {
+				vertexMarker.on('dblclick', (e: any) => {
+					L.DomEvent.stopPropagation(e);
+					if (vertexClickTimer) { clearTimeout(vertexClickTimer); vertexClickTimer = null; }
+					closePolygon();
+				});
+			}
+			vertexMarkersLayer.addLayer(vertexMarker);
+		});
+	}
+
+	function addVertex(latlng: LatLng) {
+		drawingPolygon = [...drawingPolygon, latlng];
+		renderDrawingPreview();
+	}
+
+	function removeVertex(index: number) {
+		drawingPolygon = drawingPolygon.filter((_, i) => i !== index);
+		renderDrawingPreview();
+	}
+
+	function closePolygon() {
+		if (drawingPolygon.length < 3) return;
+		const enclosed = withCoords.filter((l) => pointInPolygon(l.latitude!, l.longitude!, drawingPolygon));
+		applyEnclosedSelection(enclosed);
+		cancelDrawing();
+	}
+
+	function updateRectPreview(a: LatLng, b: LatLng) {
+		if (rectPreviewLayer) { rectPreviewLayer.remove(); rectPreviewLayer = null; }
+		rectPreviewLayer = L.rectangle(L.latLngBounds([a, b]), {
+			color: '#2DC653',
+			weight: 2,
+			fillOpacity: 0.08,
+			dashArray: '6 4'
+		}).addTo(mapInstance);
+	}
+
+	function finalizeRectangle(a: LatLng, b: LatLng) {
+		if (rectPreviewLayer) { rectPreviewLayer.remove(); rectPreviewLayer = null; }
+		const bounds = L.latLngBounds([a, b]);
+		const enclosed = withCoords.filter((l) => bounds.contains([l.latitude!, l.longitude!]));
+		applyEnclosedSelection(enclosed);
+	}
+
+	function handleMapMouseDown(e: any) {
+		const now = Date.now();
+		const pt = e.containerPoint;
+		const isSecondPress =
+			lastMouseDownPoint &&
+			now - lastMouseDownAt < DOUBLE_CLICK_MS &&
+			pt.distanceTo(lastMouseDownPoint) < DOUBLE_CLICK_PX;
+
+		if (isSecondPress) {
+			secondPressActive = true;
+			secondPressLatLng = [e.latlng.lat, e.latlng.lng];
+			secondPressContainerPoint = pt;
+			isDraggingRect = false;
+			mapInstance.dragging.disable();
+			lastMouseDownPoint = null;
+		} else {
+			lastMouseDownAt = now;
+			lastMouseDownPoint = pt;
+		}
+	}
+
+	function handleMapMouseMove(e: any) {
+		if (!secondPressActive || !secondPressLatLng) return;
+		const pt = e.containerPoint;
+		if (!isDraggingRect && pt.distanceTo(secondPressContainerPoint) > DRAG_THRESHOLD_PX) {
+			isDraggingRect = true;
+		}
+		if (isDraggingRect) {
+			updateRectPreview(secondPressLatLng, [e.latlng.lat, e.latlng.lng]);
+		}
+	}
+
+	function handleMapMouseUp(e: any) {
+		if (!secondPressActive || !secondPressLatLng) return;
+		secondPressActive = false;
+		mapInstance.dragging.enable();
+
+		if (isDraggingRect) {
+			finalizeRectangle(secondPressLatLng, [e.latlng.lat, e.latlng.lng]);
+		} else {
+			addVertex(secondPressLatLng);
+		}
+		isDraggingRect = false;
+		secondPressLatLng = null;
+		secondPressContainerPoint = null;
+	}
+
+	function handleKeyDown(e: KeyboardEvent) {
+		if (e.key === 'Escape') {
+			cancelDrawing();
+			secondPressActive = false;
+			isDraggingRect = false;
+			if (mapInstance) mapInstance.dragging.enable();
+		}
 	}
 
 	function buildGoogleMapsUrl(): string {
@@ -191,58 +301,63 @@
 		return `https://www.google.com/maps/dir/${stops.join('/')}`;
 	}
 
+	let markerById: Map<string, any> = new Map();
+
+	function computeMarkerIcon(lead: Lead): any {
+		const isInRoute = routeStopIds.has(lead.id);
+		const routeIdx = routeStops.findIndex((s) => s.id === lead.id);
+		const isSelected = selected.has(lead.id);
+		const { fill, border } = markerColor(lead.priority);
+
+		let iconHtml: string;
+		let iconSize: [number, number] = [14, 14];
+		let iconAnchor: [number, number] = [7, 7];
+
+		if (routeMode && isInRoute) {
+			iconHtml = `<div style="width:22px;height:22px;background:#7C3AED;border:2px solid #A78BFA;border-radius:50%;box-shadow:0 0 10px #7C3AED99;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:0.6rem;font-weight:700;color:#fff;font-family:'JetBrains Mono',monospace;">${routeIdx + 1}</div>`;
+			iconSize = [22, 22];
+			iconAnchor = [11, 11];
+		} else if (routeMode) {
+			iconHtml = `<div style="width:14px;height:14px;background:${fill};border:2px solid ${border};border-radius:50%;box-shadow:0 0 8px ${fill}88;cursor:pointer;opacity:0.5;"></div>`;
+		} else if (isSelected) {
+			iconHtml = `<div style="width:20px;height:20px;background:#2DC653;border:2px solid #86efac;border-radius:50%;box-shadow:0 0 10px #2DC65399;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:0.7rem;font-weight:700;color:#fff;">✓</div>`;
+			iconSize = [20, 20];
+			iconAnchor = [10, 10];
+		} else {
+			iconHtml = `<div style="width:14px;height:14px;background:${fill};border:2px solid ${border};border-radius:50%;box-shadow:0 0 8px ${fill}88;cursor:pointer;"></div>`;
+		}
+
+		return L.divIcon({
+			className: '',
+			html: iconHtml,
+			iconSize,
+			iconAnchor,
+			popupAnchor: [0, -12]
+		});
+	}
+
+	// Full rebuild: tears down and recreates every marker (and any open popup).
+	// Only needed when the underlying set of markers or their click-handling
+	// (route mode vs. default) changes.
 	function renderMarkers() {
 		if (!mapInstance || !L) return;
 		if (markersLayer) markersLayer.remove();
 		markersLayer = L.layerGroup().addTo(mapInstance);
+		markerById = new Map();
 
 		for (const lead of filtered) {
-			const isInRoute = routeStopIds.has(lead.id);
-			const routeIdx = routeStops.findIndex((s) => s.id === lead.id);
-			const isSelected = selected.has(lead.id);
-			const { fill, border } = markerColor(lead.priority);
-
-			let iconHtml: string;
-			let iconSize: [number, number] = [14, 14];
-			let iconAnchor: [number, number] = [7, 7];
-
-			if (routeMode && isInRoute) {
-				iconHtml = `<div style="width:22px;height:22px;background:#7C3AED;border:2px solid #A78BFA;border-radius:50%;box-shadow:0 0 10px #7C3AED99;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:0.6rem;font-weight:700;color:#fff;font-family:'JetBrains Mono',monospace;">${routeIdx + 1}</div>`;
-				iconSize = [22, 22];
-				iconAnchor = [11, 11];
-			} else if (routeMode) {
-				iconHtml = `<div style="width:14px;height:14px;background:${fill};border:2px solid ${border};border-radius:50%;box-shadow:0 0 8px ${fill}88;cursor:pointer;opacity:0.5;"></div>`;
-			} else if (selectMode && isSelected) {
-				iconHtml = `<div style="width:20px;height:20px;background:#2DC653;border:2px solid #86efac;border-radius:50%;box-shadow:0 0 10px #2DC65399;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:0.7rem;font-weight:700;color:#fff;">✓</div>`;
-				iconSize = [20, 20];
-				iconAnchor = [10, 10];
-			} else if (selectMode) {
-				iconHtml = `<div style="width:14px;height:14px;background:${fill};border:2px solid ${border};border-radius:50%;box-shadow:0 0 8px ${fill}88;cursor:pointer;"></div>`;
-			} else {
-				iconHtml = `<div style="width:14px;height:14px;background:${fill};border:2px solid ${border};border-radius:50%;box-shadow:0 0 8px ${fill}88;cursor:pointer;"></div>`;
-			}
-
-			const icon = L.divIcon({
-				className: '',
-				html: iconHtml,
-				iconSize,
-				iconAnchor,
-				popupAnchor: [0, -12]
-			});
-
-			const marker = L.marker([lead.latitude!, lead.longitude!], { icon });
+			const marker = L.marker([lead.latitude!, lead.longitude!], { icon: computeMarkerIcon(lead) });
+			marker.on('mousedown', (e: any) => L.DomEvent.stopPropagation(e));
 
 			if (routeMode) {
 				marker.on('click', () => {
 					toggleRouteStop(lead);
-					renderMarkers();
-				});
-			} else if (selectMode) {
-				marker.on('click', () => {
-					onToggleSelect(lead.id);
-					renderMarkers();
 				});
 			} else {
+				marker.on('click', () => {
+					onToggleSelect(lead.id);
+				});
+				const { fill } = markerColor(lead.priority);
 				const priorityBadge = `<span style="background:${fill}22;color:${fill};padding:2px 6px;border-radius:100px;font-size:0.68rem;font-family:'Syne',sans-serif;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;">${lead.priority ?? '—'}</span>`;
 				marker.bindPopup(
 					L.popup({ maxWidth: 260 }).setContent(`
@@ -259,48 +374,71 @@
 					`)
 				);
 			}
+			markerById.set(lead.id, marker);
 			markersLayer.addLayer(marker);
+		}
+	}
+
+	// Lightweight update: swaps each marker's icon in place without touching the
+	// marker/popup instances, so selecting/deselecting a pin doesn't close an
+	// open popup or interrupt an in-progress click on it.
+	function refreshMarkerIcons() {
+		for (const lead of filtered) {
+			const marker = markerById.get(lead.id);
+			if (marker) marker.setIcon(computeMarkerIcon(lead));
 		}
 	}
 
 	$effect(() => {
 		void filtered;
-		void routeStopIds;
-		void selected;
-		void selectMode;
 		renderMarkers();
+	});
+
+	$effect(() => {
+		void selected;
+		void routeStopIds;
+		refreshMarkerIcons();
 	});
 
 	onMount(async () => {
 		L = (await import('leaflet')).default;
-		await import('leaflet-draw');
 		mapInstance = L.map(mapContainer).setView([49.8, -97.1], 10);
 		L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 			attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
 		}).addTo(mapInstance);
 
-		drawnItemsLayer = new L.FeatureGroup().addTo(mapInstance);
-		drawControl = new L.Control.Draw({
-			draw: {
-				polygon: true,
-				rectangle: true,
-				marker: false,
-				circle: false,
-				circlemarker: false,
-				polyline: false
-			},
-			edit: { featureGroup: drawnItemsLayer }
-		});
-		mapInstance.on(L.Draw.Event.CREATED, handlePolygonCreated);
+		mapInstance.doubleClickZoom.disable();
+		mapInstance.on('mousedown', handleMapMouseDown);
+		mapInstance.on('mousemove', handleMapMouseMove);
+		mapInstance.on('mouseup', handleMapMouseUp);
+		window.addEventListener('keydown', handleKeyDown);
 
 		renderMarkers();
-		if (withCoords.length > 0) {
-			const pts = withCoords.map((l) => [l.latitude!, l.longitude!] as [number, number]);
-			mapInstance.fitBounds(L.latLngBounds(pts), { padding: [40, 40] });
-		}
+
+		// The flex-based layout may not have settled yet when onMount runs, so the
+		// container can still be zero-sized here — fitBounds against a zero-sized
+		// container computes a nonsensical zoom/origin. Defer both invalidateSize
+		// and the initial fitBounds to the ResizeObserver, which fires immediately
+		// with the container's current size and again whenever it actually changes.
+		let didInitialFit = false;
+		resizeObserver = new ResizeObserver(() => {
+			if (!mapInstance) return;
+			mapInstance.invalidateSize();
+			if (!didInitialFit && withCoords.length > 0 && mapContainer.offsetWidth > 0 && mapContainer.offsetHeight > 0) {
+				didInitialFit = true;
+				const pts = withCoords.map((l) => [l.latitude!, l.longitude!] as [number, number]);
+				mapInstance.fitBounds(L.latLngBounds(pts), { padding: [40, 40] });
+			}
+		});
+		resizeObserver.observe(mapContainer);
 	});
 
-	onDestroy(() => mapInstance?.remove());
+	onDestroy(() => {
+		if (!mapInstance) return;
+		resizeObserver?.disconnect();
+		window.removeEventListener('keydown', handleKeyDown);
+		mapInstance.remove();
+	});
 
 	async function handleGeocode() {
 		geocoding = true;
@@ -312,11 +450,6 @@
 		}
 	}
 </script>
-
-<svelte:head>
-	<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-	<link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
-</svelte:head>
 
 <div class="toolbar">
 	<span class="counts">{filtered.length} pins shown</span>
@@ -332,19 +465,11 @@
 		<button onclick={toggleRouteMode} class="route-toggle-btn" class:active={routeMode}>
 			{routeMode ? '✕ Exit Route Mode' : '🚶 Plan Route'}
 		</button>
-		<button onclick={toggleSelectMode} class="route-toggle-btn select-toggle-btn" class:active={selectMode}>
-			{selectMode ? '✕ Exit Select Mode' : '☑ Select Leads'}
-		</button>
-		<button onclick={toggleDrawMode} class="route-toggle-btn draw-toggle-btn" class:active={drawMode}>
-			{drawMode ? '✕ Exit Draw' : '✏️ Draw Area'}
-		</button>
 	</div>
 </div>
-{#if drawMode}
-	<p class="draw-hint">
-		{selectMode
-			? 'Draw a polygon or rectangle on the map to add every lead inside it to your selection.'
-			: 'Draw a polygon or rectangle on the map to select every lead inside it and start a route.'}
+{#if !routeMode}
+	<p class="gesture-hint">
+		Click a pin to select it · double-click empty map to drop a point (double-click the first point again to close the shape) · double-click and drag for a rectangle
 	</p>
 {/if}
 
@@ -389,10 +514,6 @@
 				</div>
 			{/if}
 		</div>
-	{/if}
-
-	{#if selectMode}
-		<p class="select-hint-overlay">Click pins or draw an area to select leads for bulk actions.</p>
 	{/if}
 </div>
 
@@ -468,13 +589,7 @@
 		color: #C4B5FD;
 	}
 
-	.select-toggle-btn.active {
-		background: rgba(45, 198, 83, 0.15);
-		border-color: #2DC653;
-		color: #86efac;
-	}
-
-	.draw-hint {
+	.gesture-hint {
 		width: 100%;
 		padding: 0.4rem 2rem 0;
 		margin: 0;
@@ -494,23 +609,6 @@
 	.map {
 		flex: 1;
 		height: 100%;
-	}
-
-	.select-hint-overlay {
-		position: absolute;
-		bottom: 1rem;
-		left: 50%;
-		transform: translateX(-50%);
-		background: rgba(10, 10, 15, 0.85);
-		border: 1px solid rgba(45, 198, 83, 0.35);
-		color: #86efac;
-		padding: 0.4rem 0.9rem;
-		border-radius: var(--radius-pill);
-		font-size: 0.78rem;
-		backdrop-filter: blur(8px);
-		z-index: 1000;
-		pointer-events: none;
-		white-space: nowrap;
 	}
 
 	.route-panel {
