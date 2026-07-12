@@ -267,10 +267,16 @@ All routes require `Authorization: Bearer <token>` except `/api/health`.
 
 `/api/mcp` exposes a remote HTTP MCP (Model Context Protocol) endpoint, built on
 `mcp-handler` + `@modelcontextprotocol/sdk`, so MCP clients (Claude, etc.) can manage
-leads directly. Auth is a shared secret — `Authorization: Bearer <MCP_API_KEY>` — checked
-in the route before delegating to the handler; this is independent of the Supabase-cookie
-auth used by the browser-facing `/api/*` routes above (MCP clients aren't logged in via
-Supabase).
+leads directly. Auth is OAuth via WorkOS AuthKit (Dynamic Client Registration) — MCP
+clients discover the authorization server from `/.well-known/oauth-protected-resource`
+(`src/routes/.well-known/oauth-protected-resource/+server.ts`), register themselves
+dynamically, and get access tokens scoped to the `MCP_RESOURCE_URL` resource indicator.
+The route verifies the bearer token's signature/issuer/audience against WorkOS's JWKS
+(via `jose`) and requires `sub` to match `WORKOS_AUTHORIZED_USER_ID` — a single-user
+server. This is independent of the Supabase-cookie auth used by the browser-facing
+`/api/*` routes above (MCP clients aren't logged in via Supabase). WorkOS project:
+`leadgen-mcp` (Staging environment — Production wasn't activated because it required
+adding billing info).
 
 Shared business logic lives in `src/lib/server/leadOperations.ts` and `clientOperations.ts`
 — both the HTTP API routes and the MCP tools call the same functions, so they can't drift.
@@ -317,8 +323,11 @@ SMTP_PASS=
 SMTP_FROM="Liam Nicholson <you@yourdomain.com>"
 SMTP_SIGNATURE_URL=https://yoursite.vercel.app/email-signature-A.png
 
-# MCP server (remote HTTP endpoint at /api/mcp — shared-secret auth, not Supabase auth)
-MCP_API_KEY=
+# MCP server (remote HTTP endpoint at /api/mcp — WorkOS AuthKit OAuth, not Supabase auth)
+WORKOS_ISSUER=
+WORKOS_CLIENT_ID=
+WORKOS_AUTHORIZED_USER_ID=
+MCP_RESOURCE_URL=
 ```
 
 Copy `.env.example` to `.env`. Never commit `.env`.
