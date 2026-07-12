@@ -267,10 +267,39 @@ All routes require `Authorization: Bearer <token>` except `/api/health`.
 
 `/api/mcp` exposes a remote HTTP MCP (Model Context Protocol) endpoint, built on
 `mcp-handler` + `@modelcontextprotocol/sdk`, so MCP clients (Claude, etc.) can manage
-leads directly. Auth is a shared secret — `Authorization: Bearer <MCP_API_KEY>` — checked
-in the route before delegating to the handler; this is independent of the Supabase-cookie
-auth used by the browser-facing `/api/*` routes above (MCP clients aren't logged in via
-Supabase).
+leads directly. This is independent of the Supabase-cookie auth used by the browser-facing
+`/api/*` routes above (MCP clients aren't logged in via Supabase). Two auth paths are
+accepted, checked in one `verifyToken` callback passed to `mcp-handler`'s `withMcpAuth`:
+
+- **Shared secret** — `Authorization: Bearer <MCP_API_KEY>`, for the maintainer's own
+  scripts/curl access.
+- **OAuth (WorkOS AuthKit)** — for interactive MCP clients like Claude Desktop, whose
+  "Connect" flow requires a real OAuth 2.1 authorization server (dynamic client
+  registration, PKCE, hosted `/authorize`/`/token`). `mcp-handler` only verifies tokens;
+  WorkOS AuthKit is the authorization server that actually issues them. See "OAuth Setup"
+  below.
+
+### OAuth Setup
+
+WorkOS AuthKit is a separate identity source used **only** to authorize MCP client
+connections (e.g. Claude Desktop) — it has no bearing on the Supabase-backed dashboard
+login. One-time setup (manual, in the WorkOS dashboard):
+
+1. Create a WorkOS account and project, then enable AuthKit for it.
+2. Under the project's MCP/Connect auth settings, enable **Dynamic Client Registration
+   (DCR)** — this lets Claude Desktop register itself as an OAuth client automatically at
+   connect-time (including its own redirect URI), so no manual per-client redirect URI
+   setup is needed.
+3. Create one AuthKit user for yourself — this is the account you log into when Claude
+   Desktop's browser OAuth prompt appears.
+4. Copy the AuthKit issuer/domain into `WORKOS_ISSUER`, and (optionally) your WorkOS user
+   id into `WORKOS_AUTHORIZED_USER_ID` as a belt-and-suspenders check so only your account
+   can ever obtain a working MCP token. Set `MCP_RESOURCE_URL` to this app's deployed
+   `/api/mcp` URL (used as the JWT `audience` and the protected-resource identifier).
+
+`src/routes/.well-known/oauth-protected-resource/+server.ts` publishes OAuth Protected
+Resource Metadata (RFC 9728) pointing MCP clients at `WORKOS_ISSUER`, so they know where to
+start the OAuth flow before calling `/api/mcp`.
 
 Shared business logic lives in `src/lib/server/leadOperations.ts` and `clientOperations.ts`
 — both the HTTP API routes and the MCP tools call the same functions, so they can't drift.
@@ -319,6 +348,12 @@ SMTP_SIGNATURE_URL=https://yoursite.vercel.app/email-signature-A.png
 
 # MCP server (remote HTTP endpoint at /api/mcp — shared-secret auth, not Supabase auth)
 MCP_API_KEY=
+
+# MCP OAuth (WorkOS AuthKit) — see "MCP Server" > "OAuth Setup" above
+WORKOS_ISSUER=
+WORKOS_CLIENT_ID=
+WORKOS_AUTHORIZED_USER_ID=
+MCP_RESOURCE_URL=
 ```
 
 Copy `.env.example` to `.env`. Never commit `.env`.
