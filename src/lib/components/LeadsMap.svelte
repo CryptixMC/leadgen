@@ -40,17 +40,15 @@
 	let previewShapeLayer: any = null;
 	let rectPreviewLayer: any = null;
 
-	// Double-click / drag gesture bookkeeping
-	const DOUBLE_CLICK_MS = 400;
-	const DOUBLE_CLICK_PX = 20;
+	// Press-and-hold gesture bookkeeping
+	const HOLD_MS = 500;
+	const MOVE_CANCEL_PX = 10;
 	const DRAG_THRESHOLD_PX = 8;
-	let lastMouseDownAt = 0;
-	let lastMouseDownPoint: any = null;
-	let secondPressActive = false;
-	let secondPressLatLng: LatLng | null = null;
-	let secondPressContainerPoint: any = null;
+	let holdTimer: ReturnType<typeof setTimeout> | null = null;
+	let holdOrigin: { point: any; latlng: LatLng } | null = null;
+	let holdTriggered = false;
 	let isDraggingRect = false;
-	let vertexClickTimer: ReturnType<typeof setTimeout> | null = null;
+	let holdIndicatorEl: HTMLDivElement | null = null;
 
 	let mapContainer: HTMLDivElement;
 	let mapInstance: any = null;
@@ -145,7 +143,44 @@
 		if (vertexMarkersLayer) vertexMarkersLayer.clearLayers();
 		if (previewShapeLayer) { previewShapeLayer.remove(); previewShapeLayer = null; }
 		if (rectPreviewLayer) { rectPreviewLayer.remove(); rectPreviewLayer = null; }
-		if (vertexClickTimer) { clearTimeout(vertexClickTimer); vertexClickTimer = null; }
+		if (holdTriggered && mapInstance) mapInstance.dragging.enable();
+		clearHoldState();
+	}
+
+	// Press-and-hold indicator: a small ring that "charges" while the pointer
+	// is held down, so the gesture is visible instead of a blind timing race.
+	function containerPointOf(latlng: LatLng): any {
+		return mapInstance.latLngToContainerPoint(latlng);
+	}
+
+	function showHoldIndicator(point: any) {
+		if (!mapContainer) return;
+		hideHoldIndicator();
+		holdIndicatorEl = document.createElement('div');
+		holdIndicatorEl.className = 'hold-indicator';
+		holdIndicatorEl.style.left = `${point.x}px`;
+		holdIndicatorEl.style.top = `${point.y}px`;
+		holdIndicatorEl.style.setProperty('--hold-ms', `${HOLD_MS}ms`);
+		mapContainer.appendChild(holdIndicatorEl);
+	}
+
+	function triggerHoldIndicatorVisual() {
+		holdIndicatorEl?.classList.add('triggered');
+	}
+
+	function hideHoldIndicator() {
+		if (holdIndicatorEl) {
+			holdIndicatorEl.remove();
+			holdIndicatorEl = null;
+		}
+	}
+
+	function clearHoldState() {
+		if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+		hideHoldIndicator();
+		holdOrigin = null;
+		holdTriggered = false;
+		isDraggingRect = false;
 	}
 
 	function applyEnclosedSelection(enclosed: Lead[]) {
@@ -181,22 +216,29 @@
 				fillOpacity: 1,
 				weight: 2
 			});
-			vertexMarker.on('mousedown', (e: any) => L.DomEvent.stopPropagation(e));
-			vertexMarker.on('click', (e: any) => {
+
+			// Same tap-vs-hold primitive as the map: a quick tap on the first
+			// vertex closes the shape; holding any vertex deletes it.
+			let vertexTimer: ReturnType<typeof setTimeout> | null = null;
+			let vertexTriggered = false;
+			vertexMarker.on('mousedown', (e: any) => {
 				L.DomEvent.stopPropagation(e);
-				if (vertexClickTimer) return;
-				vertexClickTimer = setTimeout(() => {
-					vertexClickTimer = null;
+				vertexTriggered = false;
+				showHoldIndicator(containerPointOf(latlng));
+				vertexTimer = setTimeout(() => {
+					vertexTimer = null;
+					vertexTriggered = true;
+					hideHoldIndicator();
 					removeVertex(i);
-				}, 250);
+				}, HOLD_MS);
 			});
-			if (isFirst) {
-				vertexMarker.on('dblclick', (e: any) => {
-					L.DomEvent.stopPropagation(e);
-					if (vertexClickTimer) { clearTimeout(vertexClickTimer); vertexClickTimer = null; }
-					closePolygon();
-				});
-			}
+			vertexMarker.on('mouseup', (e: any) => {
+				L.DomEvent.stopPropagation(e);
+				if (vertexTimer) { clearTimeout(vertexTimer); vertexTimer = null; }
+				hideHoldIndicator();
+				if (vertexTriggered) return;
+				if (isFirst && drawingPolygon.length >= 3) closePolygon();
+			});
 			vertexMarkersLayer.addLayer(vertexMarker);
 		});
 	}
@@ -235,60 +277,62 @@
 		applyEnclosedSelection(enclosed);
 	}
 
-	function handleMapMouseDown(e: any) {
-		const now = Date.now();
-		const pt = e.containerPoint;
-		const isSecondPress =
-			lastMouseDownPoint &&
-			now - lastMouseDownAt < DOUBLE_CLICK_MS &&
-			pt.distanceTo(lastMouseDownPoint) < DOUBLE_CLICK_PX;
+	function triggerHold() {
+		if (!holdOrigin) return;
+		holdTriggered = true;
+		triggerHoldIndicatorVisual();
+		mapInstance.dragging.disable();
+	}
 
-		if (isSecondPress) {
-			secondPressActive = true;
-			secondPressLatLng = [e.latlng.lat, e.latlng.lng];
-			secondPressContainerPoint = pt;
-			isDraggingRect = false;
-			mapInstance.dragging.disable();
-			lastMouseDownPoint = null;
-		} else {
-			lastMouseDownAt = now;
-			lastMouseDownPoint = pt;
-		}
+	function handleMapMouseDown(e: any) {
+		holdOrigin = { point: e.containerPoint, latlng: [e.latlng.lat, e.latlng.lng] };
+		holdTriggered = false;
+		isDraggingRect = false;
+		showHoldIndicator(e.containerPoint);
+		holdTimer = setTimeout(triggerHold, HOLD_MS);
 	}
 
 	function handleMapMouseMove(e: any) {
-		if (!secondPressActive || !secondPressLatLng) return;
+		if (!holdOrigin) return;
 		const pt = e.containerPoint;
-		if (!isDraggingRect && pt.distanceTo(secondPressContainerPoint) > DRAG_THRESHOLD_PX) {
+		if (!holdTriggered) {
+			if (pt.distanceTo(holdOrigin.point) > MOVE_CANCEL_PX) clearHoldState();
+			return;
+		}
+		if (!isDraggingRect && pt.distanceTo(holdOrigin.point) > DRAG_THRESHOLD_PX) {
 			isDraggingRect = true;
+			hideHoldIndicator();
 		}
 		if (isDraggingRect) {
-			updateRectPreview(secondPressLatLng, [e.latlng.lat, e.latlng.lng]);
+			updateRectPreview(holdOrigin.latlng, [e.latlng.lat, e.latlng.lng]);
 		}
 	}
 
 	function handleMapMouseUp(e: any) {
-		if (!secondPressActive || !secondPressLatLng) return;
-		secondPressActive = false;
-		mapInstance.dragging.enable();
+		if (!holdOrigin) return;
+		const wasTriggered = holdTriggered;
+		const wasDragging = isDraggingRect;
+		const origin = holdOrigin;
+		if (wasTriggered) mapInstance.dragging.enable();
+		clearHoldState();
 
-		if (isDraggingRect) {
-			finalizeRectangle(secondPressLatLng, [e.latlng.lat, e.latlng.lng]);
+		if (!wasTriggered) return; // plain tap/drag on empty map — unchanged Leaflet default
+
+		if (wasDragging) {
+			finalizeRectangle(origin.latlng, [e.latlng.lat, e.latlng.lng]);
 		} else {
-			addVertex(secondPressLatLng);
+			addVertex(origin.latlng);
 		}
-		isDraggingRect = false;
-		secondPressLatLng = null;
-		secondPressContainerPoint = null;
+	}
+
+	function handleMapMouseLeave() {
+		if (!holdOrigin) return;
+		if (holdTriggered) mapInstance.dragging.enable();
+		clearHoldState();
 	}
 
 	function handleKeyDown(e: KeyboardEvent) {
-		if (e.key === 'Escape') {
-			cancelDrawing();
-			secondPressActive = false;
-			isDraggingRect = false;
-			if (mapInstance) mapInstance.dragging.enable();
-		}
+		if (e.key === 'Escape') cancelDrawing();
 	}
 
 	function buildGoogleMapsUrl(): string {
@@ -407,10 +451,10 @@
 			attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
 		}).addTo(mapInstance);
 
-		mapInstance.doubleClickZoom.disable();
 		mapInstance.on('mousedown', handleMapMouseDown);
 		mapInstance.on('mousemove', handleMapMouseMove);
 		mapInstance.on('mouseup', handleMapMouseUp);
+		mapInstance.on('mouseleave', handleMapMouseLeave);
 		window.addEventListener('keydown', handleKeyDown);
 
 		renderMarkers();
@@ -469,7 +513,7 @@
 </div>
 {#if !routeMode}
 	<p class="gesture-hint">
-		Click a pin to select it · double-click empty map to drop a point (double-click the first point again to close the shape) · double-click and drag for a rectangle
+		Tap a pin to select it · press and hold empty map to drop a point, drag while holding for a rectangle · tap the first point to close a shape, hold any point to delete it
 	</p>
 {/if}
 
@@ -609,6 +653,43 @@
 	.map {
 		flex: 1;
 		height: 100%;
+		position: relative;
+		touch-action: none;
+		-webkit-touch-callout: none;
+		-webkit-user-select: none;
+		user-select: none;
+	}
+
+	:global(.hold-indicator) {
+		position: absolute;
+		width: 28px;
+		height: 28px;
+		margin-left: -14px;
+		margin-top: -14px;
+		border-radius: 50%;
+		border: 2px solid #2DC653;
+		background: rgba(45, 198, 83, 0.15);
+		pointer-events: none;
+		transform: scale(0.3);
+		opacity: 0.6;
+		animation: hold-charge var(--hold-ms, 500ms) linear forwards;
+		z-index: 1000;
+	}
+
+	:global(.hold-indicator.triggered) {
+		border-color: #D946EF;
+		background: rgba(217, 70, 239, 0.25);
+		animation: hold-pulse 300ms ease-out forwards;
+	}
+
+	@keyframes hold-charge {
+		from { transform: scale(0.3); opacity: 0.6; }
+		to { transform: scale(1); opacity: 1; }
+	}
+
+	@keyframes hold-pulse {
+		from { transform: scale(1); opacity: 1; }
+		to { transform: scale(1.6); opacity: 0; }
 	}
 
 	.route-panel {
