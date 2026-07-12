@@ -276,19 +276,21 @@ Shared business logic lives in `src/lib/server/leadOperations.ts` and `clientOpe
 — both the HTTP API routes and the MCP tools call the same functions, so they can't drift.
 Tools are registered in `src/lib/server/mcpTools.ts`.
 
+Email sending is intentionally **not** exposed via MCP — only drafting (`generate_lead_email`).
+Sending an email stays a human action in the dashboard (`/api/leads/[id]/send-email`).
+
 | Tool | Notes |
 |---|---|
 | `list_leads` | filter by `status`/`priority`, `include_hidden` |
 | `get_lead` | by id |
 | `create_lead` | manual lead |
 | `update_lead` | status/notes/hidden/contact fields; rescoring on `website_url`/`email` change; auto-creates a client on `closed_won` |
-| `delete_leads` | delete one or more leads by id |
+| `delete_leads` | delete one or more leads by id — requires confirmation: first call previews the leads to be deleted, a second call with `confirm: true` actually deletes |
 | `enrich_lead` | run enrichment pipeline (`deep` option) |
 | `rescore_leads` | re-enrich + rescore (`force` option) |
 | `geocode_missing_leads` | backfill lat/lng |
 | `trigger_scrape` | Google Places scrape (category+city, or polygon) |
-| `generate_lead_email` | Gemini AI draft |
-| `send_lead_email` | SMTP send + notes log |
+| `generate_lead_email` | Gemini AI draft (no send) |
 | `list_clients` / `get_client` | read-only |
 
 ---

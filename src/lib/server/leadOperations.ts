@@ -145,6 +145,17 @@ export async function updateLead(id: string, payload: Record<string, unknown>): 
 	return data as Lead;
 }
 
+export async function getLeadsSummary(
+	ids: string[]
+): Promise<{ id: string; business_name: string; status: string }[]> {
+	const { data, error: err } = await db
+		.from('leads')
+		.select('id, business_name, status')
+		.in('id', ids);
+	if (err) throw new LeadOpError(err.message, 500);
+	return data ?? [];
+}
+
 export async function deleteLeads(ids: string[]): Promise<{ deleted: number }> {
 	if (!ids?.length) throw new LeadOpError('No IDs provided', 400);
 	const { error: err } = await db.from('leads').delete().in('id', ids);

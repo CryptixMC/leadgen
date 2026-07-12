@@ -98,9 +98,26 @@ export function registerLeadTools(server: McpServer) {
 
 	server.registerTool(
 		'delete_leads',
-		{ description: 'Delete one or more leads by id.', inputSchema: { ids: z.array(z.string()).min(1) } },
-		async ({ ids }) => {
+		{
+			description:
+				'Delete one or more leads by id. Requires confirmation: call without confirm first to preview what would be deleted, then call again with confirm: true to actually delete.',
+			inputSchema: {
+				ids: z.array(z.string()).min(1),
+				confirm: z
+					.boolean()
+					.optional()
+					.describe('Must be true to actually delete. Omit or false to preview first.')
+			}
+		},
+		async ({ ids, confirm }) => {
 			try {
+				if (!confirm) {
+					const leads = await leadOps.getLeadsSummary(ids);
+					return ok({
+						message: `This will permanently delete ${leads.length} lead(s). Call delete_leads again with confirm: true to proceed.`,
+						leads
+					});
+				}
 				return ok(await leadOps.deleteLeads(ids));
 			} catch (e) {
 				return fail(e);
@@ -194,32 +211,6 @@ export function registerLeadTools(server: McpServer) {
 						templateBody: template_body,
 						senderName: sender_name,
 						extraContext: extra_context
-					})
-				);
-			} catch (e) {
-				return fail(e);
-			}
-		}
-	);
-
-	server.registerTool(
-		'send_lead_email',
-		{
-			description: 'Send an email to a lead via SMTP and log it in the lead notes.',
-			inputSchema: {
-				id: z.string(),
-				subject: z.string(),
-				email_body: z.string(),
-				mark_contacted: z.boolean().optional()
-			}
-		},
-		async ({ id, subject, email_body, mark_contacted }) => {
-			try {
-				return ok(
-					await leadOps.sendLeadEmailAndLog(id, {
-						subject,
-						emailBody: email_body,
-						markContacted: mark_contacted
 					})
 				);
 			} catch (e) {
