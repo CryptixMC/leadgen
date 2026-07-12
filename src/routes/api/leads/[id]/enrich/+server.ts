@@ -1,35 +1,17 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { db } from '$lib/server/db';
 import { requireAuth } from '$lib/server/auth';
-import { runEnrichment } from '$lib/server/enrichment';
-import { calculateScore } from '$lib/server/scoring';
+import { enrichLead, LeadOpError } from '$lib/server/leadOperations';
 
 export const POST: RequestHandler = async ({ locals, params, url }) => {
 	if (locals.demo) return json({ ok: true });
 
 	requireAuth(locals);
-	const { data: lead, error: err } = await db
-		.from('leads')
-		.select('*')
-		.eq('id', params.id)
-		.single();
-	if (err || !lead) throw error(404, 'Lead not found');
-
-	const deep = url.searchParams.get('deep') === 'true';
-	const enrichment = await runEnrichment(lead as Record<string, unknown>, { deep });
-	const merged = { ...(lead as Record<string, unknown>), ...enrichment };
-	const [score, priority] = calculateScore(merged);
-	enrichment.lead_score = score;
-	enrichment.priority = priority;
-	enrichment.last_updated = new Date().toISOString();
-
-	const { data: updated, error: updateErr } = await db
-		.from('leads')
-		.update(enrichment)
-		.eq('id', params.id)
-		.select()
-		.single();
-	if (updateErr || !updated) throw error(500, 'Failed to update lead after enrichment');
-	return json(updated);
+	try {
+		const deep = url.searchParams.get('deep') === 'true';
+		return json(await enrichLead(params.id, { deep }));
+	} catch (e) {
+		if (e instanceof LeadOpError) throw error(e.status, e.message);
+		throw error(500, e instanceof Error ? e.message : 'Enrichment failed');
+	}
 };

@@ -51,7 +51,10 @@ leadgen/
 │   │       ├── scoring.ts          # lead scoring — single source of truth
 │   │       ├── email.ts            # Nodemailer setup
 │   │       ├── gemini.ts           # Gemini AI email draft generation
-│   │       └── utils.ts            # URL validation helpers
+│   │       ├── utils.ts            # URL validation helpers
+│   │       ├── leadOperations.ts   # shared lead business logic (HTTP routes + MCP tools)
+│   │       ├── clientOperations.ts # shared client query logic
+│   │       └── mcpTools.ts         # MCP tool registrations
 │   ├── routes/
 │   │   ├── +layout.server.ts       # auth guard — redirects to /login if no session
 │   │   ├── +layout.svelte          # nav + global styles
@@ -67,7 +70,8 @@ leadgen/
 │   │   │   │   ├── export/         # GET — TSV download
 │   │   │   │   ├── geocode-missing/# POST — fill missing lat/lng
 │   │   │   │   └── rescore/        # POST — re-enrich + rescore all
-│   │   │   └── scrapes/            # POST /api/scrapes — trigger Places scrape
+│   │   │   ├── scrapes/            # POST /api/scrapes — trigger Places scrape
+│   │   │   └── mcp/                # GET/POST/DELETE /api/mcp — remote MCP server
 │   │   ├── leads/[id]/             # lead detail page, status/notes/edit-lead editing
 │   │   ├── clients/                # clients list + individual client pages
 │   │   ├── map/                    # Leaflet map of geocoded leads
@@ -259,6 +263,38 @@ All routes require `Authorization: Bearer <token>` except `/api/health`.
 
 ---
 
+## MCP Server
+
+`/api/mcp` exposes a remote HTTP MCP (Model Context Protocol) endpoint, built on
+`mcp-handler` + `@modelcontextprotocol/sdk`, so MCP clients (Claude, etc.) can manage
+leads directly. Auth is a shared secret — `Authorization: Bearer <MCP_API_KEY>` — checked
+in the route before delegating to the handler; this is independent of the Supabase-cookie
+auth used by the browser-facing `/api/*` routes above (MCP clients aren't logged in via
+Supabase).
+
+Shared business logic lives in `src/lib/server/leadOperations.ts` and `clientOperations.ts`
+— both the HTTP API routes and the MCP tools call the same functions, so they can't drift.
+Tools are registered in `src/lib/server/mcpTools.ts`.
+
+Email sending is intentionally **not** exposed via MCP — only drafting (`generate_lead_email`).
+Sending an email stays a human action in the dashboard (`/api/leads/[id]/send-email`).
+
+| Tool | Notes |
+|---|---|
+| `list_leads` | filter by `status`/`priority`, `include_hidden` |
+| `get_lead` | by id |
+| `create_lead` | manual lead |
+| `update_lead` | status/notes/hidden/contact fields; rescoring on `website_url`/`email` change; auto-creates a client on `closed_won` |
+| `delete_leads` | delete one or more leads by id — requires confirmation: first call previews the leads to be deleted, a second call with `confirm: true` actually deletes |
+| `enrich_lead` | run enrichment pipeline (`deep` option) |
+| `rescore_leads` | re-enrich + rescore (`force` option) |
+| `geocode_missing_leads` | backfill lat/lng |
+| `trigger_scrape` | Google Places scrape (category+city, or polygon) |
+| `generate_lead_email` | Gemini AI draft (no send) |
+| `list_clients` / `get_client` | read-only |
+
+---
+
 ## Environment Variables
 
 ```env
@@ -280,6 +316,9 @@ SMTP_USER=you@yourdomain.com
 SMTP_PASS=
 SMTP_FROM="Liam Nicholson <you@yourdomain.com>"
 SMTP_SIGNATURE_URL=https://yoursite.vercel.app/email-signature-A.png
+
+# MCP server (remote HTTP endpoint at /api/mcp — shared-secret auth, not Supabase auth)
+MCP_API_KEY=
 ```
 
 Copy `.env.example` to `.env`. Never commit `.env`.
