@@ -1,4 +1,9 @@
-import { ANTHROPIC_API_KEY } from '$env/static/private';
+import { env } from '$env/dynamic/private';
+
+// Uses $env/dynamic/private (not static) because this key is brand new and won't yet be
+// configured in every deployment target — static env vars must exist at build time or the
+// build itself fails to resolve the import; dynamic ones are read at request time instead.
+const ANTHROPIC_API_KEY = env.ANTHROPIC_API_KEY;
 
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_MODEL = 'claude-3-5-haiku-latest';
