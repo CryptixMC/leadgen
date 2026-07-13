@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 node_modules/
 .svelte-kit/
+.vercel/
 .env.local
 .env.*.local
 dist/
