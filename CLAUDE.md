@@ -144,6 +144,7 @@ mobile_friendly      boolean
 website_inferred     boolean        -- true if URL was discovered, not from GBP
 website_screenshot   text nullable  -- base64 data URI from PageSpeed final-screenshot
 email                text nullable
+email_unverified     boolean        -- true if email came from the AI web-search fallback, not a direct page fetch
 site_age_estimate    text
 also_on_yelp         boolean
 yelp_url             text nullable
@@ -234,6 +235,27 @@ Priority:
 
 Score recalculates after every enrichment run.
 
+### Find Contact
+
+A separate, deeper pipeline (`findContact()` in `enrichment.ts`, triggered by the "Find
+Contact" button — only shown when a lead is missing email or phone) that fills gaps only
+(never overwrites an existing email/phone). Stages, in order, stopping once both fields are
+found: homepage → keyword/label-matched + catch-all same-origin subpage crawl → known social
+bios → newly-discovered social bios → AI web-search fallback. Bounded by a 50s wall-clock
+deadline (not a flat per-fetch timeout) so a slow site trades away later stages instead of
+every stage being starved equally — stays under the route's `maxDuration: 60`.
+
+Email extraction (`extractContactInfo()`, shared with Quick/Deep Scan) checks, in order:
+`mailto:`/`tel:` links → Cloudflare's email-obfuscation `data-cfemail` encoding (decoded
+with the same XOR-with-first-byte algorithm Cloudflare's own JS uses) → JSON-LD structured
+data → plain-text regex → `name [at] domain [dot] com`-style de-obfuscated text.
+
+The AI web-search fallback (`src/lib/server/aiContactSearch.ts`) calls Claude via the
+Anthropic API with its hosted web-search tool, instructed to only report values confirmed
+on the business's own site. Since this can't be verified by a direct page fetch, any email
+it supplies is marked `email_unverified = true` (surfaced in the UI as a warning badge) —
+every other source (on-site crawl, social bios, manual Edit Lead entry) sets it `false`.
+
 ---
 
 ## API Endpoints
@@ -250,9 +272,10 @@ All routes require `Authorization: Bearer <token>` except `/api/health`.
 | POST | `/api/leads/geocode-missing` | Fill null lat/lng via Places Details API |
 | POST | `/api/leads/rescore` | Re-enrich + rescore all leads |
 | GET | `/api/leads/[id]` | Single lead |
-| PATCH | `/api/leads/[id]` | Update `status`, `notes`, `hidden`, `business_name`, `address`, `phone`, `email`, and/or `website_url` |
+| PATCH | `/api/leads/[id]` | Update `status`, `notes`, `hidden`, `business_name`, `address`, `phone`, `email`, `website_url`, `owner_name`, and/or the 6 social URLs |
 | DELETE | `/api/leads/[id]` | Delete lead |
 | POST | `/api/leads/[id]/enrich` | Run enrichment pipeline |
+| POST | `/api/leads/[id]/find-contact` | Deeper gap-filling scan for a missing email/phone only |
 | POST | `/api/leads/[id]/generate-email` | Generate AI email draft via Gemini |
 | POST | `/api/leads/[id]/send-email` | Send email via SMTP |
 | POST | `/api/scrapes` | Trigger Google Places scrape |
@@ -272,6 +295,7 @@ GOOGLE_PLACES_API_KEY=
 GOOGLE_PAGESPEED_API_KEY=
 YELP_API_KEY=
 GEMINI_API_KEY=
+ANTHROPIC_API_KEY=
 
 # Email (Proton Mail SMTP — no Bridge needed)
 SMTP_HOST=smtp.proton.me
@@ -307,8 +331,11 @@ configures the Supabase MCP server for direct DB access during development.
 - Lead score recalculates on every enrichment update, and also when `website_url` or `email`
   is changed via the Edit Lead modal (those feed scoring signals).
 - Status and notes are user-writable inline on the lead detail page; Business Name, Address,
-  Phone, Email, and Website URL are user-writable via the Edit Lead modal. Every other field
-  is enrichment-owned.
+  Phone, Email, Website URL, Owner/Contact Name, and the 6 social URLs are user-writable via
+  the Edit Lead modal. Every other field is enrichment-owned.
+- `email_unverified` is set `false` whenever email comes from a direct source (on-site
+  crawl, social bio, manual Edit Lead entry) and `true` only when Find Contact's AI
+  web-search fallback supplies it — surfaced as a warning badge in the UI.
 - Social media and aggregator URLs must be filtered before saving `website_url` — use `utils.ts` helpers.
 - Scraper handles 429s with exponential backoff in `scraper.ts`.
 - Never hardcode API keys — always use `import { env } from '$env/dynamic/private'`.

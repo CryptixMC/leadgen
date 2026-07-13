@@ -159,8 +159,11 @@
 			const hadEmail = Boolean(lead.email);
 			const hadPhone = Boolean(lead.phone);
 			lead = await findContact(lead.id);
-			enrichMsg = (lead.email && !hadEmail) || (lead.phone && !hadPhone)
-				? 'Contact found!'
+			const foundNew = (lead.email && !hadEmail) || (lead.phone && !hadPhone);
+			enrichMsg = foundNew
+				? lead.email_unverified
+					? 'Contact found (email unverified — please double-check)!'
+					: 'Contact found!'
 				: 'No new contact info found.';
 		} catch {
 			enrichMsg = 'Contact search failed.';
@@ -364,7 +367,12 @@
 				<dd>{fmt(lead.phone)}</dd>
 				{#if lead.email}
 					<dt>Email</dt>
-					<dd><a href={`mailto:${lead.email}`} class="contact-link">{lead.email}</a></dd>
+					<dd>
+						<a href={`mailto:${lead.email}`} class="contact-link">{lead.email}</a>
+						{#if lead.email_unverified}
+							<span class="inferred-warn">⚠️ Found via web search — please verify</span>
+						{/if}
+					</dd>
 				{/if}
 				<dt>Website</dt>
 				<dd>

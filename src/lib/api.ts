@@ -28,6 +28,7 @@ export interface Lead {
 	tiktok_url: string | null;
 	youtube_url: string | null;
 	email: string | null;
+	email_unverified: boolean;
 	website_inferred: boolean | null;
 	website_source: string | null;
 	website_screenshot: string | null;

@@ -8,6 +8,7 @@ import {
 	assertPublicHttpUrl
 } from './utils.js';
 import { GOOGLE_PAGESPEED_API_KEY, YELP_API_KEY, GOOGLE_PLACES_API_KEY } from '$env/static/private';
+import { searchContactViaAI } from './aiContactSearch.js';
 
 const PAGESPEED_URL = 'https://www.googleapis.com/pagespeedonline/v5/runPagespeed';
 const YELP_SEARCH_URL = 'https://api.yelp.com/v3/businesses/search';
@@ -265,6 +266,23 @@ function extractJsonLdContact($: ReturnType<typeof cheerioLoad>): { email: strin
 	return found;
 }
 
+// Reverses Cloudflare's "Email Address Obfuscation" feature (on by default on many
+// shared-hosting/security-plugin WordPress sites): the real address never appears in the
+// raw HTML at all, replaced by a "[email protected]" placeholder plus this encoded span,
+// decoded client-side by Cloudflare's own JS using this same XOR-with-first-byte algorithm.
+function decodeCfEmail(encoded: string): string | null {
+	try {
+		const key = parseInt(encoded.substring(0, 2), 16);
+		let email = '';
+		for (let i = 2; i < encoded.length; i += 2) {
+			email += String.fromCharCode(parseInt(encoded.substring(i, i + 2), 16) ^ key);
+		}
+		return email;
+	} catch {
+		return null;
+	}
+}
+
 function extractContactInfo($: ReturnType<typeof cheerioLoad>): { email: string | null; phone: string | null } {
 	let email: string | null = null;
 	let phone: string | null = null;
@@ -281,6 +299,17 @@ function extractContactInfo($: ReturnType<typeof cheerioLoad>): { email: string 
 			if (candidate.replace(/\D/g, '').length >= 10) phone = candidate;
 		}
 	});
+
+	if (!email) {
+		const encoded = $('[data-cfemail]').first().attr('data-cfemail');
+		if (encoded) {
+			const decoded = decodeCfEmail(encoded);
+			if (decoded) {
+				EMAIL_RE.lastIndex = 0;
+				if (EMAIL_RE.test(decoded)) email = decoded;
+			}
+		}
+	}
 
 	if (!email || !phone) {
 		const jsonLd = extractJsonLdContact($);
@@ -521,7 +550,11 @@ const CONTACT_PAGE_KEYWORDS = [
 const FIND_CONTACT_BUDGET_MS = 50_000;
 const FIND_CONTACT_MIN_STAGE_MS = 8_000;
 
-export async function findContact(lead: Record<string, unknown>): Promise<{ email: string | null; phone: string | null }> {
+const AI_SEARCH_MIN_STAGE_MS = 15_000;
+
+export async function findContact(
+	lead: Record<string, unknown>
+): Promise<{ email: string | null; phone: string | null; emailUnverified: boolean }> {
 	const deadline = Date.now() + FIND_CONTACT_BUDGET_MS;
 	const timeLeft = () => deadline - Date.now();
 
@@ -640,7 +673,19 @@ export async function findContact(lead: Record<string, unknown>): Promise<{ emai
 		);
 	}
 
-	return { email, phone };
+	// Last resort: an AI-powered web search for the business's own published contact
+	// details. Less certain than a direct page fetch — flag anything it supplies.
+	let emailUnverified = false;
+	if (!satisfied() && biz && timeLeft() > AI_SEARCH_MIN_STAGE_MS) {
+		const found = await searchContactViaAI(biz, addr, websiteUrl);
+		if (needEmail && !email && found.email) {
+			email = found.email;
+			emailUnverified = true;
+		}
+		if (needPhone && !phone && found.phone) phone = found.phone;
+	}
+
+	return { email, phone, emailUnverified };
 }
 
 async function discoverWebsiteGoogle(
@@ -845,7 +890,10 @@ export async function runEnrichment(lead: Record<string, unknown>, { deep = fals
 		else Object.assign(enrichment, Object.fromEntries(
 			Object.entries(pagespeed as Record<string, unknown>).filter(([, v]) => v !== null)
 		));
-		if (websiteData.email) enrichment.email = websiteData.email;
+		if (websiteData.email) {
+			enrichment.email = websiteData.email;
+			enrichment.email_unverified = false;
+		}
 		if (websiteData.site_age_estimate) enrichment.site_age_estimate = websiteData.site_age_estimate;
 
 		const scrapedSocial = (websiteData.social_links ?? {}) as Record<string, string>;
@@ -887,7 +935,10 @@ export async function runEnrichment(lead: Record<string, unknown>, { deep = fals
 				if (!platform) continue;
 
 				const contact = await extractContactFromSocialBio(platform, profileUrl);
-				if (needEmail && contact.email && !enrichment.email) enrichment.email = contact.email;
+				if (needEmail && contact.email && !enrichment.email) {
+					enrichment.email = contact.email;
+					enrichment.email_unverified = false;
+				}
 				if (needPhone && contact.phone && !(enrichment as Record<string, unknown>).phone) {
 					(enrichment as Record<string, unknown>).phone = contact.phone;
 				}

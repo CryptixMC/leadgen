@@ -67,7 +67,8 @@ alter table leads
 	add column if not exists social_activity_score  int,
 	add column if not exists website_source         text,
 	add column if not exists category               text,
-	add column if not exists gbp_social_url          text;
+	add column if not exists gbp_social_url          text,
+	add column if not exists email_unverified        boolean not null default false;
 
 -- ----------------------------------------------------------------------------
 -- 2. clients

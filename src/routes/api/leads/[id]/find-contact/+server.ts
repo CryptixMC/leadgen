@@ -21,7 +21,7 @@ export const POST: RequestHandler = async ({ locals, params }) => {
 		.single();
 	if (err || !lead) throw error(404, 'Lead not found');
 
-	let contact: { email: string | null; phone: string | null };
+	let contact: { email: string | null; phone: string | null; emailUnverified: boolean };
 	try {
 		contact = await findContact(lead as Record<string, unknown>);
 	} catch (e) {
@@ -30,7 +30,10 @@ export const POST: RequestHandler = async ({ locals, params }) => {
 	}
 
 	const updates: Record<string, unknown> = {};
-	if (contact.email && !lead.email) updates.email = contact.email;
+	if (contact.email && !lead.email) {
+		updates.email = contact.email;
+		updates.email_unverified = contact.emailUnverified;
+	}
 	if (contact.phone && !lead.phone) updates.phone = contact.phone;
 
 	if (Object.keys(updates).length === 0) {

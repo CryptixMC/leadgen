@@ -52,7 +52,10 @@ export const PATCH: RequestHandler = async ({ locals, params, request }) => {
 	}
 	if (payload.address !== undefined) updateData.address = payload.address || null;
 	if (payload.phone !== undefined) updateData.phone = payload.phone || null;
-	if (payload.email !== undefined) updateData.email = payload.email || null;
+	if (payload.email !== undefined) {
+		updateData.email = payload.email || null;
+		updateData.email_unverified = false;
+	}
 	if (payload.website_url !== undefined) {
 		let websiteUrl: string | null;
 		try {
