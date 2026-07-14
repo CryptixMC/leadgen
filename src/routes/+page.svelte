@@ -19,7 +19,8 @@
 		| 'email'
 		| 'lead_score'
 		| 'priority'
-		| 'status';
+		| 'status'
+		| 'created_at';
 	let sortColumn = $state<SortColumn>('lead_score');
 	let sortDir = $state<'asc' | 'desc'>('desc');
 	let selected = $state(new Set<string>());
@@ -132,6 +133,9 @@
 			case 'status':
 				cmp = (STATUS_RANK[a.status] ?? 0) - (STATUS_RANK[b.status] ?? 0);
 				break;
+			case 'created_at':
+				cmp = (a.created_at ? Date.parse(a.created_at) : 0) - (b.created_at ? Date.parse(b.created_at) : 0);
+				break;
 		}
 		return dir === 'asc' ? cmp : -cmp;
 	}
@@ -141,7 +145,7 @@
 			sortDir = sortDir === 'asc' ? 'desc' : 'asc';
 		} else {
 			sortColumn = column;
-			sortDir = column === 'lead_score' ? 'desc' : 'asc';
+			sortDir = column === 'lead_score' || column === 'created_at' ? 'desc' : 'asc';
 		}
 	}
 
@@ -282,6 +286,19 @@
 		if (s === 'contacted') return 'badge badge-contacted';
 		return 'badge badge-cold';
 	}
+
+	function formatRelativeTime(iso: string | null): string {
+		if (!iso) return '—';
+		const diffMs = Date.now() - Date.parse(iso);
+		const minutes = Math.floor(diffMs / 60000);
+		if (minutes < 1) return 'just now';
+		if (minutes < 60) return `${minutes}m ago`;
+		const hours = Math.floor(minutes / 60);
+		if (hours < 24) return `${hours}h ago`;
+		const days = Math.floor(hours / 24);
+		if (days < 30) return `${days}d ago`;
+		return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+	}
 </script>
 
 <svelte:head>
@@ -396,6 +413,7 @@
 					<th class="sortable num" onclick={() => toggleSort('lead_score')}>Score{sortIndicator('lead_score')}</th>
 					<th class="sortable" onclick={() => toggleSort('priority')}>Priority{sortIndicator('priority')}</th>
 					<th class="sortable" onclick={() => toggleSort('status')}>Status{sortIndicator('status')}</th>
+					<th class="sortable" onclick={() => toggleSort('created_at')}>Added{sortIndicator('created_at')}</th>
 					<th class="actions-col">Scan</th>
 				</tr>
 			</thead>
@@ -453,6 +471,7 @@
 						<td class="num score">{lead.lead_score ?? '—'}</td>
 						<td><span class={priorityClass(lead.priority)}>{lead.priority ?? '—'}</span></td>
 						<td><span class={statusClass(lead.status)}>{lead.status}</span></td>
+						<td class="added-cell">{formatRelativeTime(lead.created_at)}</td>
 						<td class="actions-col" onclick={(e) => e.stopPropagation()}>
 							<div class="row-actions">
 								<button
@@ -473,7 +492,7 @@
 				{/each}
 				{#if filtered.length === 0}
 					<tr>
-						<td colspan="10" class="empty">No leads match your filters.</td>
+						<td colspan="11" class="empty">No leads match your filters.</td>
 					</tr>
 				{/if}
 			</tbody>
@@ -490,6 +509,7 @@
 		<button class="mobile-sort-th" onclick={() => toggleSort('lead_score')}>Score{sortIndicator('lead_score')}</button>
 		<button class="mobile-sort-th" onclick={() => toggleSort('priority')}>Priority{sortIndicator('priority')}</button>
 		<button class="mobile-sort-th" onclick={() => toggleSort('status')}>Status{sortIndicator('status')}</button>
+		<button class="mobile-sort-th" onclick={() => toggleSort('created_at')}>Added{sortIndicator('created_at')}</button>
 	</div>
 
 	<!-- Mobile card list (shown only on small screens) -->
@@ -511,6 +531,7 @@
 						<span class="card-name">{lead.business_name}</span>
 						<span class="card-score" style="color: {lead.lead_score !== null && lead.lead_score >= 60 ? 'var(--accent-highlight)' : lead.lead_score !== null && lead.lead_score >= 30 ? '#818cf8' : 'var(--text-muted)'}">{lead.lead_score ?? '—'}</span>
 					</div>
+					<div class="card-added">Added {formatRelativeTime(lead.created_at)}</div>
 					{#if lead.category}
 						<div class="card-category">{lead.category}</div>
 					{/if}
@@ -935,6 +956,12 @@
 	.category-cell {
 		color: var(--text-muted);
 		white-space: nowrap;
+	}
+
+	.added-cell {
+		color: var(--text-muted);
+		white-space: nowrap;
+		font-size: 0.85rem;
 	}
 
 	.maps-link {
@@ -1474,6 +1501,11 @@
 		color: var(--text-muted);
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
+	}
+
+	.card-added {
+		font-size: 0.72rem;
+		color: var(--text-muted);
 	}
 
 	.card-badges {

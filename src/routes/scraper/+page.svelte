@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onDestroy, tick } from 'svelte';
-	import { triggerScrape, rescoreLeads, geocodeLocation } from '$lib/api';
+	import { triggerScrape, rescoreLeads, geocodeLocation, batchHideLeads, batchDeleteLeads, type NewLeadSummary } from '$lib/api';
 	import { generateCoveringGrid, polygonBounds, haversineKm, DEFAULT_CELL_RADIUS_M, MAX_GRID_CELLS, type LatLng } from '$lib/geo';
 
 	const JUMP_ZOOM = 16;
@@ -11,8 +11,62 @@
 	let neighborhood = $state('');
 	let target = $state(60);
 	let loading = $state(false);
-	let result = $state<{ upserted: number; category: string; city: string; pages_fetched: number } | null>(null);
+	let result = $state<{ upserted: number; category: string; city: string; pages_fetched: number; newLeads?: NewLeadSummary[] } | null>(null);
 	let error = $state('');
+
+	let reviewSelected = $state(new Set<string>());
+	let reviewBusy = $state(false);
+
+	const allReviewSelected = $derived(
+		(result?.newLeads?.length ?? 0) > 0 && result!.newLeads!.every((l) => reviewSelected.has(l.id))
+	);
+
+	function toggleReviewSelect(id: string) {
+		const next = new Set(reviewSelected);
+		if (next.has(id)) next.delete(id);
+		else next.add(id);
+		reviewSelected = next;
+	}
+
+	function toggleReviewSelectAll() {
+		if (!result?.newLeads) return;
+		if (allReviewSelected) {
+			reviewSelected = new Set();
+		} else {
+			reviewSelected = new Set(result.newLeads.map((l) => l.id));
+		}
+	}
+
+	async function hideReviewSelected() {
+		if (!result?.newLeads || reviewSelected.size === 0) return;
+		reviewBusy = true;
+		try {
+			const ids = [...reviewSelected];
+			await batchHideLeads(ids);
+			result = { ...result, newLeads: result.newLeads.filter((l) => !reviewSelected.has(l.id)) };
+			reviewSelected = new Set();
+		} catch (err) {
+			alert(err instanceof Error ? err.message : 'Hide failed');
+		} finally {
+			reviewBusy = false;
+		}
+	}
+
+	async function deleteReviewSelected() {
+		if (!result?.newLeads || reviewSelected.size === 0) return;
+		if (!confirm(`Delete ${reviewSelected.size} lead${reviewSelected.size === 1 ? '' : 's'}? This cannot be undone.`)) return;
+		reviewBusy = true;
+		try {
+			const ids = [...reviewSelected];
+			await batchDeleteLeads(ids);
+			result = { ...result, newLeads: result.newLeads.filter((l) => !reviewSelected.has(l.id)) };
+			reviewSelected = new Set();
+		} catch (err) {
+			alert(err instanceof Error ? err.message : 'Delete failed');
+		} finally {
+			reviewBusy = false;
+		}
+	}
 
 	let rescoreLoading = $state(false);
 	let rescoreResult = $state<{ updated: number; total: number } | null>(null);
@@ -148,6 +202,7 @@
 		loading = true;
 		error = '';
 		result = null;
+		reviewSelected = new Set();
 
 		try {
 			result =
@@ -326,6 +381,42 @@
 				<p class="result-detail">No new results — try a different area/category, or these may already be in your leads list.</p>
 			{/if}
 			<a href="/" class="view-link">View leads →</a>
+
+			{#if result.newLeads && result.newLeads.length > 0}
+				<div class="review-panel">
+					<div class="review-header">
+						<span>Review {result.newLeads.length} new lead{result.newLeads.length === 1 ? '' : 's'}</span>
+						<button type="button" class="review-select-all-btn" onclick={toggleReviewSelectAll}>
+							{allReviewSelected ? 'Deselect all' : 'Select all'}
+						</button>
+					</div>
+					<ul class="review-list">
+						{#each result.newLeads as lead (lead.id)}
+							<li>
+								<label class="review-item">
+									<input
+										type="checkbox"
+										checked={reviewSelected.has(lead.id)}
+										onchange={() => toggleReviewSelect(lead.id)}
+									/>
+									<span class="review-name">{lead.business_name}</span>
+									<span class="review-meta">{lead.category ?? '—'} · {lead.address}</span>
+								</label>
+							</li>
+						{/each}
+					</ul>
+					{#if reviewSelected.size > 0}
+						<div class="review-actions">
+							<button type="button" class="hide-btn" onclick={hideReviewSelected} disabled={reviewBusy}>
+								{reviewBusy ? 'Hiding…' : `Hide ${reviewSelected.size} selected`}
+							</button>
+							<button type="button" class="delete-btn" onclick={deleteReviewSelected} disabled={reviewBusy}>
+								{reviewBusy ? 'Deleting…' : `Delete ${reviewSelected.size} selected`}
+							</button>
+						</div>
+					{/if}
+				</div>
+			{/if}
 		</div>
 	{/if}
 
@@ -657,6 +748,123 @@
 
 	.view-link:hover {
 		color: var(--accent-primary);
+	}
+
+	.review-panel {
+		border-top: 1px solid rgba(45, 198, 83, 0.2);
+		margin-top: 0.5rem;
+		padding-top: 0.85rem;
+	}
+
+	.review-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 0.6rem;
+		font-size: 0.8rem;
+		color: var(--text-primary);
+	}
+
+	.review-select-all-btn {
+		background: transparent;
+		border: 1px solid var(--border-subtle);
+		color: var(--text-muted);
+		padding: 0.3rem 0.7rem;
+		border-radius: var(--radius-pill);
+		cursor: pointer;
+		font-size: 0.72rem;
+		transition: border-color var(--dur-fast), color var(--dur-fast);
+	}
+
+	.review-select-all-btn:hover {
+		border-color: var(--accent-primary);
+		color: var(--text-primary);
+	}
+
+	.review-list {
+		list-style: none;
+		margin: 0 0 0.75rem;
+		padding: 0;
+		max-height: 260px;
+		overflow-y: auto;
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+	}
+
+	.review-item {
+		display: flex;
+		align-items: baseline;
+		gap: 0.5rem;
+		font-size: 0.78rem;
+		color: var(--text-primary);
+		cursor: pointer;
+	}
+
+	.review-item input[type='checkbox'] {
+		width: auto;
+		accent-color: var(--accent-primary);
+		cursor: pointer;
+	}
+
+	.review-name {
+		font-weight: 600;
+		flex-shrink: 0;
+	}
+
+	.review-meta {
+		color: var(--text-muted);
+		font-size: 0.72rem;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.review-actions {
+		display: flex;
+		gap: 0.5rem;
+	}
+
+	.hide-btn {
+		background: transparent;
+		border: 1px solid rgba(251, 191, 36, 0.3);
+		color: #fbbf24;
+		padding: 0.38rem 0.85rem;
+		border-radius: var(--radius-pill);
+		cursor: pointer;
+		font-size: 0.8rem;
+		transition: border-color var(--dur-fast), background var(--dur-fast);
+	}
+
+	.hide-btn:hover:not(:disabled) {
+		background: rgba(251, 191, 36, 0.08);
+		border-color: #fbbf24;
+	}
+
+	.hide-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.delete-btn {
+		background: transparent;
+		border: 1px solid rgba(248, 113, 113, 0.3);
+		color: #f87171;
+		padding: 0.38rem 0.85rem;
+		border-radius: var(--radius-pill);
+		cursor: pointer;
+		font-size: 0.8rem;
+		transition: border-color var(--dur-fast), background var(--dur-fast);
+	}
+
+	.delete-btn:hover:not(:disabled) {
+		background: rgba(248, 113, 113, 0.08);
+		border-color: #f87171;
+	}
+
+	.delete-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
 	}
 
 	.spinner {
