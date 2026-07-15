@@ -218,26 +218,39 @@
 			});
 
 			// Same tap-vs-hold primitive as the map: a quick tap on the first
-			// vertex closes the shape; holding any vertex deletes it.
+			// vertex closes the shape; holding any vertex deletes it. Bound to
+			// native Pointer Events (not Leaflet's re-emitted mouse events) so
+			// the hold timer actually starts at touch-down on real touchscreens
+			// — see the map-level pointer handlers for why.
 			let vertexTimer: ReturnType<typeof setTimeout> | null = null;
 			let vertexTriggered = false;
-			vertexMarker.on('mousedown', (e: any) => {
-				L.DomEvent.stopPropagation(e);
-				vertexTriggered = false;
-				showHoldIndicator(containerPointOf(latlng));
-				vertexTimer = setTimeout(() => {
-					vertexTimer = null;
-					vertexTriggered = true;
+			vertexMarker.on('add', () => {
+				const el = vertexMarker.getElement();
+				if (!el) return;
+				el.addEventListener('pointerdown', (e: PointerEvent) => {
+					if (!e.isPrimary) return;
+					e.stopPropagation();
+					vertexTriggered = false;
+					showHoldIndicator(containerPointOf(latlng));
+					vertexTimer = setTimeout(() => {
+						vertexTimer = null;
+						vertexTriggered = true;
+						hideHoldIndicator();
+						removeVertex(i);
+					}, HOLD_MS);
+				});
+				el.addEventListener('pointerup', (e: PointerEvent) => {
+					e.stopPropagation();
+					if (vertexTimer) { clearTimeout(vertexTimer); vertexTimer = null; }
 					hideHoldIndicator();
-					removeVertex(i);
-				}, HOLD_MS);
-			});
-			vertexMarker.on('mouseup', (e: any) => {
-				L.DomEvent.stopPropagation(e);
-				if (vertexTimer) { clearTimeout(vertexTimer); vertexTimer = null; }
-				hideHoldIndicator();
-				if (vertexTriggered) return;
-				if (isFirst && drawingPolygon.length >= 3) closePolygon();
+					if (vertexTriggered) return;
+					if (isFirst && drawingPolygon.length >= 3) closePolygon();
+				});
+				el.addEventListener('pointercancel', (e: PointerEvent) => {
+					e.stopPropagation();
+					if (vertexTimer) { clearTimeout(vertexTimer); vertexTimer = null; }
+					hideHoldIndicator();
+				});
 			});
 			vertexMarkersLayer.addLayer(vertexMarker);
 		});
@@ -284,17 +297,43 @@
 		mapInstance.dragging.disable();
 	}
 
-	function handleMapMouseDown(e: any) {
-		holdOrigin = { point: e.containerPoint, latlng: [e.latlng.lat, e.latlng.lng] };
-		holdTriggered = false;
-		isDraggingRect = false;
-		showHoldIndicator(e.containerPoint);
-		holdTimer = setTimeout(triggerHold, HOLD_MS);
+	// Native Pointer Events, not Leaflet's re-emitted 'mousedown'/'mouseup' map
+	// events: on a real touchscreen, browsers only synthesize those *after*
+	// touchend fires (bunched together right as the finger lifts), so a hold
+	// timer anchored to Leaflet's mousedown never gets a real head start while
+	// the finger is down. Pointer Events fire immediately for mouse, touch, and
+	// pen alike with no such delay.
+	function containerPointFromEvent(e: PointerEvent): any {
+		const rect = mapInstance.getContainer().getBoundingClientRect();
+		return L.point(e.clientX - rect.left, e.clientY - rect.top);
 	}
 
-	function handleMapMouseMove(e: any) {
-		if (!holdOrigin) return;
-		const pt = e.containerPoint;
+	function handleMapPointerDown(e: PointerEvent) {
+		if (!e.isPrimary) {
+			// A second finger touched down (pinch-zoom) — abandon any hold so
+			// Leaflet's native pinch handling isn't fought.
+			if (holdTriggered) mapInstance.dragging.enable();
+			clearHoldState();
+			return;
+		}
+		// Deliberately no e.preventDefault() here: it would suppress the browser's
+		// synthesized compatibility mouse events, which Leaflet's own internal
+		// drag-to-pan handling still relies on — breaking plain click-drag
+		// panning. touch-action: none (on .map) already stops native touch
+		// scroll/zoom without that side effect.
+		const point = containerPointFromEvent(e);
+		const ll = mapInstance.containerPointToLatLng(point);
+		holdOrigin = { point, latlng: [ll.lat, ll.lng] };
+		holdTriggered = false;
+		isDraggingRect = false;
+		showHoldIndicator(point);
+		holdTimer = setTimeout(triggerHold, HOLD_MS);
+		try { mapInstance.getContainer().setPointerCapture(e.pointerId); } catch {}
+	}
+
+	function handleMapPointerMove(e: PointerEvent) {
+		if (!holdOrigin || !e.isPrimary) return;
+		const pt = containerPointFromEvent(e);
 		if (!holdTriggered) {
 			if (pt.distanceTo(holdOrigin.point) > MOVE_CANCEL_PX) clearHoldState();
 			return;
@@ -304,12 +343,21 @@
 			hideHoldIndicator();
 		}
 		if (isDraggingRect) {
-			updateRectPreview(holdOrigin.latlng, [e.latlng.lat, e.latlng.lng]);
+			const ll = mapInstance.containerPointToLatLng(pt);
+			updateRectPreview(holdOrigin.latlng, [ll.lat, ll.lng]);
 		}
 	}
 
-	function handleMapMouseUp(e: any) {
-		if (!holdOrigin) return;
+	function releasePointerCaptureIfHeld(e: PointerEvent) {
+		try {
+			const container = mapInstance.getContainer();
+			if (container.hasPointerCapture(e.pointerId)) container.releasePointerCapture(e.pointerId);
+		} catch {}
+	}
+
+	function handleMapPointerUp(e: PointerEvent) {
+		releasePointerCaptureIfHeld(e);
+		if (!holdOrigin || !e.isPrimary) return;
 		const wasTriggered = holdTriggered;
 		const wasDragging = isDraggingRect;
 		const origin = holdOrigin;
@@ -319,13 +367,16 @@
 		if (!wasTriggered) return; // plain tap/drag on empty map — unchanged Leaflet default
 
 		if (wasDragging) {
-			finalizeRectangle(origin.latlng, [e.latlng.lat, e.latlng.lng]);
+			const pt = containerPointFromEvent(e);
+			const ll = mapInstance.containerPointToLatLng(pt);
+			finalizeRectangle(origin.latlng, [ll.lat, ll.lng]);
 		} else {
 			addVertex(origin.latlng);
 		}
 	}
 
-	function handleMapMouseLeave() {
+	function handleMapPointerCancel(e: PointerEvent) {
+		releasePointerCaptureIfHeld(e);
 		if (!holdOrigin) return;
 		if (holdTriggered) mapInstance.dragging.enable();
 		clearHoldState();
@@ -392,6 +443,11 @@
 		for (const lead of filtered) {
 			const marker = L.marker([lead.latitude!, lead.longitude!], { icon: computeMarkerIcon(lead) });
 			marker.on('mousedown', (e: any) => L.DomEvent.stopPropagation(e));
+			// Real touch devices only deliver synthetic 'mousedown' well after
+			// 'pointerdown' (see the map-level pointer handlers below), so a tap
+			// on a pin must stop the raw pointerdown too or it also reaches the
+			// map-level hold detector underneath the pin.
+			marker.on('add', () => marker.getElement()?.addEventListener('pointerdown', (e: PointerEvent) => e.stopPropagation()));
 
 			if (routeMode) {
 				marker.on('click', () => {
@@ -451,10 +507,11 @@
 			attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
 		}).addTo(mapInstance);
 
-		mapInstance.on('mousedown', handleMapMouseDown);
-		mapInstance.on('mousemove', handleMapMouseMove);
-		mapInstance.on('mouseup', handleMapMouseUp);
-		mapInstance.on('mouseleave', handleMapMouseLeave);
+		const container = mapInstance.getContainer();
+		container.addEventListener('pointerdown', handleMapPointerDown);
+		container.addEventListener('pointermove', handleMapPointerMove);
+		container.addEventListener('pointerup', handleMapPointerUp);
+		container.addEventListener('pointercancel', handleMapPointerCancel);
 		window.addEventListener('keydown', handleKeyDown);
 
 		renderMarkers();
@@ -481,6 +538,11 @@
 		if (!mapInstance) return;
 		resizeObserver?.disconnect();
 		window.removeEventListener('keydown', handleKeyDown);
+		const container = mapInstance.getContainer();
+		container.removeEventListener('pointerdown', handleMapPointerDown);
+		container.removeEventListener('pointermove', handleMapPointerMove);
+		container.removeEventListener('pointerup', handleMapPointerUp);
+		container.removeEventListener('pointercancel', handleMapPointerCancel);
 		mapInstance.remove();
 	});
 
