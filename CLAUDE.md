@@ -241,7 +241,7 @@ A separate, deeper pipeline (`findContact()` in `enrichment.ts`, triggered by th
 Contact" button — only shown when a lead is missing email or phone) that fills gaps only
 (never overwrites an existing email/phone). Stages, in order, stopping once both fields are
 found: homepage → keyword/label-matched + catch-all same-origin subpage crawl → known social
-bios → newly-discovered social bios → AI web-search fallback. Bounded by a 50s wall-clock
+bios → newly-discovered social bios → Google-search fallback. Bounded by a 50s wall-clock
 deadline (not a flat per-fetch timeout) so a slow site trades away later stages instead of
 every stage being starved equally — stays under the route's `maxDuration: 60`.
 
@@ -250,11 +250,14 @@ Email extraction (`extractContactInfo()`, shared with Quick/Deep Scan) checks, i
 with the same XOR-with-first-byte algorithm Cloudflare's own JS uses) → JSON-LD structured
 data → plain-text regex → `name [at] domain [dot] com`-style de-obfuscated text.
 
-The AI web-search fallback (`src/lib/server/aiContactSearch.ts`) calls Claude via the
-Anthropic API with its hosted web-search tool, instructed to only report values confirmed
-on the business's own site. Since this can't be verified by a direct page fetch, any email
-it supplies is marked `email_unverified = true` (surfaced in the UI as a warning badge) —
-every other source (on-site crawl, social bios, manual Edit Lead entry) sets it `false`.
+The Google-search fallback (`searchContactMentions()` in `enrichment.ts` — no AI involved)
+scans a Google results page for the business name/city, first checking the results page's
+own snippet text, then visiting a few non-social, non-data-broker results (Yellow Pages/BBB-
+style directories are deliberately not excluded — only known guessed-format data brokers
+like ZoomInfo/RocketReach are). Since this can't be verified against the business's own
+site directly, any email it supplies is marked `email_unverified = true` (surfaced in the
+UI as a warning badge) — every other source (on-site crawl, social bios, manual Edit Lead
+entry) sets it `false`.
 
 ---
 
@@ -295,7 +298,6 @@ GOOGLE_PLACES_API_KEY=
 GOOGLE_PAGESPEED_API_KEY=
 YELP_API_KEY=
 GEMINI_API_KEY=
-ANTHROPIC_API_KEY=
 
 # Email (Proton Mail SMTP — no Bridge needed)
 SMTP_HOST=smtp.proton.me

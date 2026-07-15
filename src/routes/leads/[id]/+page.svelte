@@ -317,7 +317,7 @@
 				{deepEnriching ? 'Deep scanning…' : 'Deep Scan'}
 			</button>
 			{#if !lead.email || !lead.phone}
-				<button class="enrich-btn deep-btn" onclick={handleFindContact} disabled={enriching || deepEnriching || findingContact} title="Exhaustive search: sitemap crawl, structured data, de-obfuscation, social discovery, and web search for a missing email or phone (~45s)">
+				<button class="enrich-btn deep-btn" onclick={handleFindContact} disabled={enriching || deepEnriching || findingContact} title="Exhaustive search: subpage crawl, structured data, de-obfuscation, social discovery, and a directory/search lookup for a missing email or phone (~45s)">
 					{findingContact ? 'Searching…' : 'Find Contact'}
 				</button>
 			{/if}
@@ -370,7 +370,7 @@
 					<dd>
 						<a href={`mailto:${lead.email}`} class="contact-link">{lead.email}</a>
 						{#if lead.email_unverified}
-							<span class="inferred-warn">⚠️ Found via web search — please verify</span>
+							<span class="inferred-warn">⚠️ Found via directory/search lookup — please verify</span>
 						{/if}
 					</dd>
 				{/if}

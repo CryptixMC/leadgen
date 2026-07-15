@@ -8,7 +8,6 @@ import {
 	assertPublicHttpUrl
 } from './utils.js';
 import { GOOGLE_PAGESPEED_API_KEY, YELP_API_KEY, GOOGLE_PLACES_API_KEY } from '$env/static/private';
-import { searchContactViaAI } from './aiContactSearch.js';
 
 const PAGESPEED_URL = 'https://www.googleapis.com/pagespeedonline/v5/runPagespeed';
 const YELP_SEARCH_URL = 'https://api.yelp.com/v3/businesses/search';
@@ -35,6 +34,25 @@ const DIRECTORY_DOMAINS = new Set([
 	'thumbtack.com',
 	...SOCIAL_MEDIA_DOMAINS,
 	...AGGREGATOR_DOMAINS
+]);
+
+// Data-broker/people-search sites that only ever surface a *guessed* email format
+// (e.g. "first.last@company.com") rather than a real observed address — worth skipping
+// entirely for contact lookups, unlike genuine directories (Yellow Pages, BBB) which
+// sometimes carry a business's real published email and are deliberately not excluded.
+const DATA_BROKER_DOMAINS = new Set([
+	'zoominfo.com',
+	'rocketreach.co',
+	'lusha.com',
+	'apollo.io',
+	'prospeo.io',
+	'wiza.co',
+	'seamless.ai',
+	'kaspr.io',
+	'cognism.com',
+	'uplead.com',
+	'leadiq.com',
+	'clearbit.com'
 ]);
 
 const BOT_UA = 'Mozilla/5.0 (compatible; LeadGenBot/1.0)';
@@ -550,7 +568,7 @@ const CONTACT_PAGE_KEYWORDS = [
 const FIND_CONTACT_BUDGET_MS = 50_000;
 const FIND_CONTACT_MIN_STAGE_MS = 8_000;
 
-const AI_SEARCH_MIN_STAGE_MS = 15_000;
+const SEARCH_FALLBACK_MIN_STAGE_MS = 10_000;
 
 export async function findContact(
 	lead: Record<string, unknown>
@@ -673,11 +691,12 @@ export async function findContact(
 		);
 	}
 
-	// Last resort: an AI-powered web search for the business's own published contact
-	// details. Less certain than a direct page fetch — flag anything it supplies.
+	// Last resort: search Google for the business's own published contact details (results
+	// snippet text first, then a handful of directory/citation pages). Less certain than a
+	// direct page fetch — flag anything it supplies.
 	let emailUnverified = false;
-	if (!satisfied() && biz && timeLeft() > AI_SEARCH_MIN_STAGE_MS) {
-		const found = await searchContactViaAI(biz, addr, websiteUrl);
+	if (!satisfied() && biz && timeLeft() > SEARCH_FALLBACK_MIN_STAGE_MS) {
+		const found = await searchContactMentions(biz, addr);
 		if (needEmail && !email && found.email) {
 			email = found.email;
 			emailUnverified = true;
@@ -749,6 +768,92 @@ async function discoverWebsiteGoogle(
 		// ignore
 	}
 	return { websiteUrl: null, discoveredSocial };
+}
+
+// Last resort for findContact: no LLM involved — searches Google the same way
+// discoverWebsiteGoogle does, first scanning the results page's own text for an email/phone
+// (search engines often echo a business's on-page text straight into a result snippet, so
+// this can succeed without visiting anything), then visiting a handful of non-social,
+// non-data-broker results and running the normal extractContactInfo on each. Deliberately
+// does NOT filter through DIRECTORY_DOMAINS — genuine directories (Yellow Pages, BBB) are
+// exactly the kind of "other source" this is meant to check, unlike DATA_BROKER_DOMAINS.
+async function searchContactMentions(
+	businessName: string,
+	address: string
+): Promise<{ email: string | null; phone: string | null }> {
+	const city = address.includes(',') ? address.split(',')[1].trim() : address;
+	const query = `"${businessName}" "${city}" email OR contact`;
+	const found: { email: string | null; phone: string | null } = { email: null, phone: null };
+
+	try {
+		const url = `https://www.google.com/search?q=${encodeURIComponent(query)}&num=10`;
+		const resp = await fetch(url, {
+			headers: {
+				'User-Agent': BOT_UA,
+				'Accept-Language': 'en-US,en;q=0.9'
+			},
+			signal: withTimeout(8_000)
+		});
+		if (!resp.ok) return found;
+
+		const html = await resp.text();
+		const $ = cheerioLoad(html);
+
+		// Scan the results page's own visible text first — a snippet sometimes contains
+		// the answer directly, with no extra fetch needed.
+		const pageContact = extractContactInfo($);
+		found.email = pageContact.email;
+		found.phone = pageContact.phone;
+		if (found.email && found.phone) return found;
+
+		const candidateUrls: string[] = [];
+		for (const el of $('a[href]').toArray()) {
+			const raw = $(el).attr('href') ?? '';
+			let href = raw;
+
+			if (raw.startsWith('/url?')) {
+				try {
+					href = new URL('https://www.google.com' + raw).searchParams.get('q') ?? '';
+				} catch {
+					continue;
+				}
+			}
+			if (!href.startsWith('http')) continue;
+			if (isSocialMediaUrl(href)) continue;
+
+			let domain: string;
+			try {
+				domain = new URL(href).hostname.toLowerCase().replace(/^www\./, '');
+			} catch {
+				continue;
+			}
+			if (domain === 'google.com' || domain.endsWith('.google.com')) continue;
+			if ([...DATA_BROKER_DOMAINS].some((d) => domain === d || domain.endsWith('.' + d))) continue;
+
+			if (!candidateUrls.includes(href)) candidateUrls.push(href);
+			if (candidateUrls.length >= 4) break;
+		}
+
+		const results = await Promise.allSettled(
+			candidateUrls.map(async (candidateUrl) => {
+				const { response: pageResp } = await fetchSsrfSafe(candidateUrl, {
+					headers: { 'User-Agent': BOT_UA },
+					signal: withTimeout(7_000)
+				});
+				if (!pageResp.ok) return null;
+				return extractContactInfo(cheerioLoad(await pageResp.text()));
+			})
+		);
+		for (const r of results) {
+			if (r.status !== 'fulfilled' || !r.value) continue;
+			if (!found.email && r.value.email) found.email = r.value.email;
+			if (!found.phone && r.value.phone) found.phone = r.value.phone;
+			if (found.email && found.phone) break;
+		}
+	} catch {
+		// ignore
+	}
+	return found;
 }
 
 async function fetchGbpWebsite(placeId: string): Promise<string | null> {
