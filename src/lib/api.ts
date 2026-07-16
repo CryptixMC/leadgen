@@ -217,6 +217,24 @@ export async function findContactForce(
 	return { lead: data, candidateEmail: null, candidateUnverified: false };
 }
 
+export async function findContactBulk(): Promise<{ updated: number; blocked: number; total: number }> {
+	const res = await fetch(`${BASE}/leads/find-contact-bulk`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' }
+	});
+	if (!res.ok) throw new Error(`Bulk find contact failed: ${res.statusText}`);
+	return res.json();
+}
+
+export async function detectBadFitLeads(): Promise<{ flagged: number; checked: number }> {
+	const res = await fetch(`${BASE}/leads/detect-bad-fit`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' }
+	});
+	if (!res.ok) throw new Error(`Bad-fit detection failed: ${res.statusText}`);
+	return res.json();
+}
+
 export async function batchDeleteLeads(ids: string[]): Promise<{ deleted: number }> {
 	const res = await fetch(`${BASE}/leads`, {
 		method: 'DELETE',

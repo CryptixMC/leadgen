@@ -2,7 +2,7 @@
 	import { invalidateAll } from '$app/navigation';
 	import type { PageData } from './$types';
 	import type { Lead } from '$lib/api';
-	import { batchDeleteLeads, batchHideLeads, createLead, enrichLead } from '$lib/api';
+	import { batchDeleteLeads, batchHideLeads, createLead, enrichLead, findContactBulk } from '$lib/api';
 
 	let { data }: { data: PageData } = $props();
 
@@ -30,6 +30,9 @@
 	let enrichProgress = $state({ done: 0, total: 0 });
 	let enrichCurrentName = $state('');
 	let scanningId = $state<string | null>(null);
+	let findingAll = $state(false);
+	let findAllProgress = $state({ updated: 0, checked: 0 });
+	let findAllMsg = $state('');
 
 	let showCreateModal = $state(false);
 	let createLoading = $state(false);
@@ -226,6 +229,37 @@
 		}
 	}
 
+	async function runFindContactAll() {
+		if (findingAll) return;
+		if (!confirm('Run Find Contact against every lead currently missing an email? This can take a while and pauses automatically if Google starts blocking requests.')) return;
+		findingAll = true;
+		findAllProgress = { updated: 0, checked: 0 };
+		findAllMsg = 'Running…';
+		try {
+			for (;;) {
+				const result = await findContactBulk();
+				findAllProgress = {
+					updated: findAllProgress.updated + result.updated,
+					checked: findAllProgress.checked + result.total
+				};
+				if (result.total === 0) {
+					findAllMsg = `Done — found contact for ${findAllProgress.updated} of ${findAllProgress.checked} leads checked.`;
+					break;
+				}
+				if (result.blocked > 0) {
+					findAllMsg = `Paused — Google appears to be rate-limiting search requests. Found ${findAllProgress.updated} of ${findAllProgress.checked} so far; try again later.`;
+					break;
+				}
+			}
+			await invalidateAll();
+		} catch (err) {
+			findAllMsg = err instanceof Error ? err.message : 'Find Contact (All) failed.';
+		} finally {
+			findingAll = false;
+			setTimeout(() => (findAllMsg = ''), 8000);
+		}
+	}
+
 	async function scanSingleLead(id: string, deep: boolean, e: Event) {
 		e.stopPropagation();
 		scanningId = id;
@@ -360,9 +394,18 @@
 			<button class="select-unenriched-btn" onclick={selectNonEnriched}>
 				Select unenriched
 			</button>
+			<button class="select-unenriched-btn" onclick={runFindContactAll} disabled={findingAll} title="Runs Find Contact against every lead currently missing an email, in small paced batches">
+				{findingAll ? `Finding Contacts… (${findAllProgress.updated}/${findAllProgress.checked})` : 'Find Contact — All Missing'}
+			</button>
 			<button class="new-lead-btn" onclick={openCreateModal}>+ New Lead</button>
 		</div>
 	</div>
+
+	{#if findAllMsg}
+		<div class="enrich-progress">
+			<div class="progress-lead-name">{findAllMsg}</div>
+		</div>
+	{/if}
 
 	{#if enriching && enrichProgress.total > 0}
 		{@const pct = Math.round((enrichProgress.done / enrichProgress.total) * 100)}
