@@ -2,7 +2,7 @@
 	import { invalidateAll } from '$app/navigation';
 	import type { PageData } from './$types';
 	import type { Lead } from '$lib/api';
-	import { batchDeleteLeads, batchHideLeads, batchUnhideLeads, createLead, enrichLead, findContactBulk } from '$lib/api';
+	import { batchDeleteLeads, batchHideLeads, batchUnhideLeads, createLead, detectBadFitLeads, enrichLead, findContactBulk } from '$lib/api';
 
 	let { data }: { data: PageData } = $props();
 
@@ -205,6 +205,30 @@
 		const next = new Set(selected);
 		filtered.filter((l) => l.lead_score === null).forEach((l) => next.add(l.id));
 		selected = next;
+	}
+
+	function selectBadFit() {
+		const next = new Set(selected);
+		filtered.filter((l) => l.possible_bad_fit).forEach((l) => next.add(l.id));
+		selected = next;
+	}
+
+	let detectingBadFit = $state(false);
+	let badFitMsg = $state('');
+
+	async function runDetectBadFit() {
+		detectingBadFit = true;
+		badFitMsg = '';
+		try {
+			const result = await detectBadFitLeads();
+			badFitMsg = `Flagged ${result.flagged} of ${result.checked} leads as possible bad fits.`;
+			await invalidateAll();
+		} catch (err) {
+			badFitMsg = err instanceof Error ? err.message : 'Bad-fit detection failed.';
+		} finally {
+			detectingBadFit = false;
+			setTimeout(() => (badFitMsg = ''), 6000);
+		}
 	}
 
 	async function enrichSelected(deep: boolean) {
@@ -425,6 +449,12 @@
 			<button class="select-unenriched-btn" onclick={selectNonEnriched}>
 				Select unenriched
 			</button>
+			<button class="select-unenriched-btn" onclick={selectBadFit} title="Select leads flagged as possible large corp/multi-location businesses">
+				Select likely bad-fit
+			</button>
+			<button class="select-unenriched-btn" onclick={runDetectBadFit} disabled={detectingBadFit} title="Re-scan all leads for shared emails/domains/business names that suggest a franchise or multi-location chain">
+				{detectingBadFit ? 'Detecting…' : 'Detect Bad-Fit'}
+			</button>
 			<button class="select-unenriched-btn" onclick={runFindContactAll} disabled={findingAll} title="Runs Find Contact against every lead currently missing an email, in small paced batches">
 				{findingAll ? `Finding Contacts… (${findAllProgress.updated}/${findAllProgress.checked})` : 'Find Contact — All Missing'}
 			</button>
@@ -435,6 +465,12 @@
 	{#if findAllMsg}
 		<div class="enrich-progress">
 			<div class="progress-lead-name">{findAllMsg}</div>
+		</div>
+	{/if}
+
+	{#if badFitMsg}
+		<div class="enrich-progress">
+			<div class="progress-lead-name">{badFitMsg}</div>
 		</div>
 	{/if}
 
@@ -484,6 +520,9 @@
 						</td>
 						<td class="name">
 							{lead.business_name}
+							{#if lead.possible_bad_fit}
+								<span class="inferred-badge" title={lead.bad_fit_reason ?? 'Possible large corp/multi-location business'}>!</span>
+							{/if}
 							<a
 								href={`https://www.google.com/maps/place/?q=place_id:${lead.google_place_id}`}
 								target="_blank"
@@ -520,6 +559,9 @@
 									onclick={(e) => e.stopPropagation()}
 									class="email-link"
 								>{lead.email}</a>
+								{#if lead.email_unverified || lead.contact_flagged}
+									<span class="inferred-badge" title={lead.contact_flag_reason ?? 'Found via directory/search lookup — please verify'}>!</span>
+								{/if}
 							{:else}
 								<span class="none">—</span>
 							{/if}
@@ -582,7 +624,12 @@
 				</div>
 				<div class="card-body">
 					<div class="card-top">
-						<span class="card-name">{lead.business_name}</span>
+						<span class="card-name">
+							{lead.business_name}
+							{#if lead.possible_bad_fit}
+								<span class="inferred-badge" title={lead.bad_fit_reason ?? 'Possible large corp/multi-location business'}>!</span>
+							{/if}
+						</span>
 						<span class="card-score" style="color: {lead.lead_score !== null && lead.lead_score >= 60 ? 'var(--accent-highlight)' : lead.lead_score !== null && lead.lead_score >= 30 ? '#818cf8' : 'var(--text-muted)'}">{lead.lead_score ?? '—'}</span>
 					</div>
 					{#if lead.category}
@@ -618,6 +665,9 @@
 					{:else if lead.email}
 						<div class="card-meta">
 							<a href={`mailto:${lead.email}`} onclick={(e) => e.stopPropagation()} class="email-link">{lead.email}</a>
+							{#if lead.email_unverified || lead.contact_flagged}
+								<span class="inferred-badge" title={lead.contact_flag_reason ?? 'Found via directory/search lookup — please verify'}>!</span>
+							{/if}
 						</div>
 					{/if}
 				</div>

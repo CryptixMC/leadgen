@@ -393,6 +393,9 @@
 		<div>
 			<h1>{lead.business_name}</h1>
 			<p class="address">{lead.address}</p>
+			{#if lead.possible_bad_fit}
+				<span class="inferred-warn">{lead.bad_fit_reason ?? 'Possible large corp/multi-location business — may not be a good fit'}</span>
+			{/if}
 		</div>
 		<div class="score-pill" style="color: {scoreColor(lead.lead_score)}">
 			{lead.lead_score ?? '—'}
@@ -422,8 +425,8 @@
 					<dt>Email</dt>
 					<dd>
 						<a href={`mailto:${lead.email}`} class="contact-link">{lead.email}</a>
-						{#if lead.email_unverified}
-							<span class="inferred-warn">⚠️ Found via directory/search lookup — please verify</span>
+						{#if lead.email_unverified || lead.contact_flagged}
+							<span class="inferred-warn">{lead.contact_flag_reason ?? '⚠️ Found via directory/search lookup — please verify'}</span>
 						{/if}
 					</dd>
 				{/if}
