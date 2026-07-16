@@ -23,7 +23,7 @@ export const POST: RequestHandler = async ({ locals, params, url }) => {
 
 	const force = url.searchParams.get('force') === 'true';
 
-	let contact: { email: string | null; phone: string | null; emailUnverified: boolean };
+	let contact: Awaited<ReturnType<typeof findContact>>;
 	try {
 		contact = await findContact(lead as Record<string, unknown>, { forceEmail: force });
 	} catch (e) {

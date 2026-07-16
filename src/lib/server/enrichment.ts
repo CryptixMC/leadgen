@@ -579,7 +579,7 @@ const SEARCH_FALLBACK_MIN_STAGE_MS = 10_000;
 export async function findContact(
 	lead: Record<string, unknown>,
 	opts: { forceEmail?: boolean } = {}
-): Promise<{ email: string | null; phone: string | null; emailUnverified: boolean }> {
+): Promise<{ email: string | null; phone: string | null; emailUnverified: boolean; googleBlocked: boolean }> {
 	const deadline = Date.now() + FIND_CONTACT_BUDGET_MS;
 	const timeLeft = () => deadline - Date.now();
 
@@ -741,8 +741,10 @@ export async function findContact(
 	// snippet text first, then a handful of directory/citation pages). Less certain than a
 	// direct page fetch — flag anything it supplies.
 	let emailUnverified = false;
+	let googleBlocked = false;
 	if (!satisfied() && biz && timeLeft() > SEARCH_FALLBACK_MIN_STAGE_MS) {
 		const found = await searchContactMentions(biz, addr);
+		googleBlocked = found.blocked;
 		if (needEmail && !email && found.email) {
 			email = found.email;
 			emailUnverified = true;
@@ -750,7 +752,20 @@ export async function findContact(
 		if (needPhone && !phone && found.phone) phone = found.phone;
 	}
 
-	return { email, phone, emailUnverified };
+	return { email, phone, emailUnverified, googleBlocked };
+}
+
+// Google returns HTTP 200 even for its CAPTCHA/"unusual traffic" interstitial, so a plain
+// !resp.ok check can't tell "genuinely no results" apart from "we got rate-limited" — which
+// matters a lot once something is calling the Google-scrape stages across many leads in a row
+// (the bulk find-contact job). Redirects to /sorry/ are the clearest signal; the "unusual
+// traffic" wording and a normal results page's near-total absence of the usual result markup
+// are backups for the cases Google serves the interstitial without a redirect.
+function isGoogleBlocked(finalUrl: string, html: string): boolean {
+	if (finalUrl.includes('/sorry/')) return true;
+	if (/unusual traffic from your computer network/i.test(html)) return true;
+	if (!html.includes('id="search"') && !html.includes('id="rso"') && html.length < 5000) return true;
+	return false;
 }
 
 async function discoverWebsiteGoogle(
@@ -773,6 +788,7 @@ async function discoverWebsiteGoogle(
 		if (!resp.ok) return { websiteUrl: null, discoveredSocial };
 
 		const html = await resp.text();
+		if (isGoogleBlocked(resp.url, html)) return { websiteUrl: null, discoveredSocial };
 		const $ = cheerioLoad(html);
 
 		// Google encodes result URLs in various anchor formats; scan all hrefs for /url?q= pattern
@@ -826,10 +842,14 @@ async function discoverWebsiteGoogle(
 async function searchContactMentions(
 	businessName: string,
 	address: string
-): Promise<{ email: string | null; phone: string | null }> {
+): Promise<{ email: string | null; phone: string | null; blocked: boolean }> {
 	const city = address.includes(',') ? address.split(',')[1].trim() : address;
 	const query = `"${businessName}" "${city}" email OR contact`;
-	const found: { email: string | null; phone: string | null } = { email: null, phone: null };
+	const found: { email: string | null; phone: string | null; blocked: boolean } = {
+		email: null,
+		phone: null,
+		blocked: false
+	};
 
 	try {
 		const url = `https://www.google.com/search?q=${encodeURIComponent(query)}&num=10`;
@@ -843,6 +863,10 @@ async function searchContactMentions(
 		if (!resp.ok) return found;
 
 		const html = await resp.text();
+		if (isGoogleBlocked(resp.url, html)) {
+			found.blocked = true;
+			return found;
+		}
 		const $ = cheerioLoad(html);
 
 		// Scan the results page's own visible text first — a snippet sometimes contains
