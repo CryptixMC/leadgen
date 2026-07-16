@@ -40,7 +40,12 @@
 	let previewShapeLayer: any = null;
 	let rectPreviewLayer: any = null;
 
-	// Press-and-hold gesture bookkeeping
+	// True once a hold-without-drag has put the map into shape-drawing mode.
+	// While active, plain clicks place points (no per-point holding needed).
+	let drawMode = $state(false);
+
+	// Press-and-hold gesture bookkeeping (governs the single idle->mode-or-
+	// rectangle transition; once in drawMode, point placement is immediate).
 	const HOLD_MS = 500;
 	const MOVE_CANCEL_PX = 10;
 	const DRAG_THRESHOLD_PX = 8;
@@ -49,6 +54,11 @@
 	let holdTriggered = false;
 	let isDraggingRect = false;
 	let holdIndicatorEl: HTMLDivElement | null = null;
+
+	// Click-vs-pan tracking while drawMode is active — no hold delay, just a
+	// small movement threshold to tell "place a point" from "pan the map".
+	let clickOrigin: { point: any; latlng: LatLng } | null = null;
+	let clickMoved = false;
 
 	let mapContainer: HTMLDivElement;
 	let mapInstance: any = null;
@@ -139,7 +149,10 @@
 	}
 
 	function cancelDrawing() {
+		drawMode = false;
 		drawingPolygon = [];
+		clickOrigin = null;
+		clickMoved = false;
 		if (vertexMarkersLayer) vertexMarkersLayer.clearLayers();
 		if (previewShapeLayer) { previewShapeLayer.remove(); previewShapeLayer = null; }
 		if (rectPreviewLayer) { rectPreviewLayer.remove(); rectPreviewLayer = null; }
@@ -217,39 +230,51 @@
 				weight: 2
 			});
 
-			// Same tap-vs-hold primitive as the map: a quick tap on the first
-			// vertex closes the shape; holding any vertex deletes it. Bound to
-			// native Pointer Events (not Leaflet's re-emitted mouse events) so
-			// the hold timer actually starts at touch-down on real touchscreens
-			// — see the map-level pointer handlers for why.
-			let vertexTimer: ReturnType<typeof setTimeout> | null = null;
-			let vertexTriggered = false;
+			// A plain click on the first vertex closes the shape; dragging any
+			// vertex (including the first) repositions it. Pointer capture keeps
+			// move/up events targeting this element even once the cursor has
+			// moved off its small hit area, so the drag tracks continuously.
+			// Dragging is explicitly disabled/re-enabled around the gesture
+			// (same mechanism as the rectangle draw) rather than relying on
+			// stopPropagation to keep Leaflet's own pan handler from also
+			// reacting to the same pointer sequence — stopPropagation alone
+			// wasn't reliably enough to stop it here.
+			let vertexMoved = false;
+			vertexMarker.on('mousedown', (e: any) => L.DomEvent.stopPropagation(e));
 			vertexMarker.on('add', () => {
 				const el = vertexMarker.getElement();
 				if (!el) return;
 				el.addEventListener('pointerdown', (e: PointerEvent) => {
 					if (!e.isPrimary) return;
 					e.stopPropagation();
-					vertexTriggered = false;
-					showHoldIndicator(containerPointOf(latlng));
-					vertexTimer = setTimeout(() => {
-						vertexTimer = null;
-						vertexTriggered = true;
-						hideHoldIndicator();
-						removeVertex(i);
-					}, HOLD_MS);
+					vertexMoved = false;
+					mapInstance.dragging.disable();
+					try { el.setPointerCapture(e.pointerId); } catch {}
+				});
+				el.addEventListener('pointermove', (e: PointerEvent) => {
+					if (!e.isPrimary) return;
+					e.stopPropagation();
+					const pt = containerPointFromEvent(e);
+					const anchor = containerPointOf(drawingPolygon[i]);
+					if (!vertexMoved && pt.distanceTo(anchor) <= MOVE_CANCEL_PX) return;
+					vertexMoved = true;
+					const ll = mapInstance.containerPointToLatLng(pt);
+					drawingPolygon[i] = [ll.lat, ll.lng];
+					vertexMarker.setLatLng([ll.lat, ll.lng]);
+					previewShapeLayer?.setLatLngs(drawingPolygon);
 				});
 				el.addEventListener('pointerup', (e: PointerEvent) => {
 					e.stopPropagation();
-					if (vertexTimer) { clearTimeout(vertexTimer); vertexTimer = null; }
-					hideHoldIndicator();
-					if (vertexTriggered) return;
+					try { el.releasePointerCapture(e.pointerId); } catch {}
+					mapInstance.dragging.enable();
+					if (vertexMoved) return;
 					if (isFirst && drawingPolygon.length >= 3) closePolygon();
 				});
 				el.addEventListener('pointercancel', (e: PointerEvent) => {
 					e.stopPropagation();
-					if (vertexTimer) { clearTimeout(vertexTimer); vertexTimer = null; }
-					hideHoldIndicator();
+					try { el.releasePointerCapture(e.pointerId); } catch {}
+					mapInstance.dragging.enable();
+					vertexMoved = false;
 				});
 			});
 			vertexMarkersLayer.addLayer(vertexMarker);
@@ -258,11 +283,6 @@
 
 	function addVertex(latlng: LatLng) {
 		drawingPolygon = [...drawingPolygon, latlng];
-		renderDrawingPreview();
-	}
-
-	function removeVertex(index: number) {
-		drawingPolygon = drawingPolygon.filter((_, i) => i !== index);
 		renderDrawingPreview();
 	}
 
@@ -308,6 +328,13 @@
 		return L.point(e.clientX - rect.left, e.clientY - rect.top);
 	}
 
+	function releasePointerCaptureIfHeld(e: PointerEvent) {
+		try {
+			const container = mapInstance.getContainer();
+			if (container.hasPointerCapture(e.pointerId)) container.releasePointerCapture(e.pointerId);
+		} catch {}
+	}
+
 	function handleMapPointerDown(e: PointerEvent) {
 		if (!e.isPrimary) {
 			// A second finger touched down (pinch-zoom) — abandon any hold so
@@ -323,6 +350,15 @@
 		// scroll/zoom without that side effect.
 		const point = containerPointFromEvent(e);
 		const ll = mapInstance.containerPointToLatLng(point);
+
+		if (drawMode) {
+			// Already drawing: no hold delay needed here, just tell a click
+			// (place a point) apart from a drag (pan the map normally).
+			clickOrigin = { point, latlng: [ll.lat, ll.lng] };
+			clickMoved = false;
+			return;
+		}
+
 		holdOrigin = { point, latlng: [ll.lat, ll.lng] };
 		holdTriggered = false;
 		isDraggingRect = false;
@@ -332,7 +368,16 @@
 	}
 
 	function handleMapPointerMove(e: PointerEvent) {
-		if (!holdOrigin || !e.isPrimary) return;
+		if (!e.isPrimary) return;
+
+		if (drawMode) {
+			if (!clickOrigin) return;
+			const pt = containerPointFromEvent(e);
+			if (!clickMoved && pt.distanceTo(clickOrigin.point) > MOVE_CANCEL_PX) clickMoved = true;
+			return;
+		}
+
+		if (!holdOrigin) return;
 		const pt = containerPointFromEvent(e);
 		if (!holdTriggered) {
 			if (pt.distanceTo(holdOrigin.point) > MOVE_CANCEL_PX) clearHoldState();
@@ -348,16 +393,21 @@
 		}
 	}
 
-	function releasePointerCaptureIfHeld(e: PointerEvent) {
-		try {
-			const container = mapInstance.getContainer();
-			if (container.hasPointerCapture(e.pointerId)) container.releasePointerCapture(e.pointerId);
-		} catch {}
-	}
-
 	function handleMapPointerUp(e: PointerEvent) {
 		releasePointerCaptureIfHeld(e);
-		if (!holdOrigin || !e.isPrimary) return;
+		if (!e.isPrimary) return;
+
+		if (drawMode) {
+			if (!clickOrigin) return;
+			const wasMoved = clickMoved;
+			const origin = clickOrigin;
+			clickOrigin = null;
+			clickMoved = false;
+			if (!wasMoved) addVertex(origin.latlng); // moved = was a pan, not a placement
+			return;
+		}
+
+		if (!holdOrigin) return;
 		const wasTriggered = holdTriggered;
 		const wasDragging = isDraggingRect;
 		const origin = holdOrigin;
@@ -371,12 +421,19 @@
 			const ll = mapInstance.containerPointToLatLng(pt);
 			finalizeRectangle(origin.latlng, [ll.lat, ll.lng]);
 		} else {
-			addVertex(origin.latlng);
+			// Held without dragging: enter shape-drawing mode. The hold itself
+			// doesn't place a point — the next click does.
+			drawMode = true;
 		}
 	}
 
 	function handleMapPointerCancel(e: PointerEvent) {
 		releasePointerCaptureIfHeld(e);
+		if (drawMode) {
+			clickOrigin = null;
+			clickMoved = false;
+			return;
+		}
 		if (!holdOrigin) return;
 		if (holdTriggered) mapInstance.dragging.enable();
 		clearHoldState();
@@ -575,7 +632,11 @@
 </div>
 {#if !routeMode}
 	<p class="gesture-hint">
-		Tap a pin to select it · press and hold empty map to drop a point, drag while holding for a rectangle · tap the first point to close a shape, hold any point to delete it
+		{#if drawMode}
+			Click to add points · drag a point to move it · click the first point to finish the shape · Esc to cancel
+		{:else}
+			Tap a pin to select it · press and hold empty map to start drawing a shape, drag while holding for a rectangle
+		{/if}
 	</p>
 {/if}
 
