@@ -68,7 +68,11 @@ alter table leads
 	add column if not exists website_source         text,
 	add column if not exists category               text,
 	add column if not exists gbp_social_url          text,
-	add column if not exists email_unverified        boolean not null default false;
+	add column if not exists email_unverified        boolean not null default false,
+	add column if not exists possible_bad_fit        boolean not null default false,
+	add column if not exists bad_fit_reason          text,
+	add column if not exists contact_flagged         boolean not null default false,
+	add column if not exists contact_flag_reason     text;
 
 -- ----------------------------------------------------------------------------
 -- 2. clients
