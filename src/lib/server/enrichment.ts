@@ -630,9 +630,13 @@ export async function findContact(
 
 						const lower = href.toLowerCase();
 						const label = $(el).text().trim().toLowerCase();
-						const isKeywordMatch = CONTACT_PAGE_KEYWORDS.some((kw) => lower.includes(kw) || label.includes(kw));
-						if (isKeywordMatch && !subPageUrls.includes(full)) subPageUrls.push(full);
+						const matchIdx = CONTACT_PAGE_KEYWORDS.findIndex((kw) => lower.includes(kw) || label.includes(kw));
+						if (matchIdx !== -1 && !subPageUrls.includes(full)) {
+							subPageUrls.push(full);
+							subPagePriority.set(full, matchIdx);
+						}
 					});
+					subPageUrls.sort((a, b) => (subPagePriority.get(a) ?? 0) - (subPagePriority.get(b) ?? 0));
 
 					const crawlBatched = async (urlsToCrawl: string[]) => {
 						for (
