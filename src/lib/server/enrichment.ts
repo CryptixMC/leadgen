@@ -135,7 +135,7 @@ export async function fetchPagespeed(url: string): Promise<Record<string, unknow
 	}
 }
 
-function diceCoefficient(a: string, b: string): number {
+export function diceCoefficient(a: string, b: string): number {
 	if (a.length < 2 || b.length < 2) return 0;
 	const bigrams = (s: string): Map<string, number> => {
 		const map = new Map<string, number>();
