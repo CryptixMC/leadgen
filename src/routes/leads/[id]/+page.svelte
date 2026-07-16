@@ -208,6 +208,13 @@
 		}
 	}
 
+	function openInMailClient(to: string, subject: string, body: string) {
+		const mailto = `mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+		const a = document.createElement('a');
+		a.href = mailto;
+		a.click();
+	}
+
 	async function handleSendEmail() {
 		sending = true;
 		sendError = '';
@@ -219,6 +226,7 @@
 			});
 			lead = updated;
 			notes = updated.notes ?? '';
+			openInMailClient(lead.email ?? '', emailSubject, emailBody);
 			sendSuccess = true;
 			setTimeout(() => {
 				emailModalOpen = false;
@@ -736,7 +744,7 @@
 
 			<div class="modal-footer">
 				{#if sendSuccess}
-					<span class="save-msg">Email sent!</span>
+					<span class="save-msg">Draft opened in your mail client!</span>
 				{/if}
 				{#if sendError}
 					<span class="error-msg">{sendError}</span>
@@ -749,7 +757,7 @@
 					onclick={handleSendEmail}
 					disabled={sending || !emailSubject.trim() || !emailBody.trim()}
 				>
-					{sending ? 'Sending…' : 'Send Email'}
+					{sending ? 'Preparing…' : 'Create Draft'}
 				</button>
 			</div>
 		</div>

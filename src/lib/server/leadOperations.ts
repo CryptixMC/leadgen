@@ -4,7 +4,8 @@ import { normalizeWebsiteUrl } from './utils';
 import { runEnrichment } from './enrichment';
 import { Semaphore } from './scraper';
 import { generateEmail as callGemini } from './gemini';
-import { sendEmail } from './email';
+// In-app SMTP sending is disabled — see sendLeadEmailAndLog below. Uncomment to restore.
+// import { sendEmail } from './email';
 import { fillTemplate } from '$lib/emailTemplates';
 import { GOOGLE_PLACES_API_KEY } from '$env/static/private';
 import type { Lead } from '$lib/api';
@@ -320,18 +321,21 @@ export async function sendLeadEmailAndLog(
 	if (!opts.subject?.trim()) throw new LeadOpError('subject is required', 400);
 	if (!opts.emailBody?.trim()) throw new LeadOpError('emailBody is required', 400);
 
-	try {
-		await sendEmail({
-			to: lead.email as string,
-			subject: opts.subject,
-			body: opts.emailBody
-		});
-	} catch (e) {
-		throw new LeadOpError(e instanceof Error ? e.message : 'SMTP send failed', 502);
-	}
+	// In-app SMTP sending is disabled — emails are drafted here and sent manually from
+	// Proton Mail instead. Uncomment this block (and the sendEmail import above) to
+	// restore sending directly from LeadGen.
+	// try {
+	// 	await sendEmail({
+	// 		to: lead.email as string,
+	// 		subject: opts.subject,
+	// 		body: opts.emailBody
+	// 	});
+	// } catch (e) {
+	// 	throw new LeadOpError(e instanceof Error ? e.message : 'SMTP send failed', 502);
+	// }
 
 	const timestamp = new Date().toUTCString();
-	const noteEntry = `Email sent: ${timestamp} — ${opts.subject}`;
+	const noteEntry = `Email drafted: ${timestamp} — ${opts.subject}`;
 	const existingNotes = (lead.notes as string | null) ?? '';
 	const updatedNotes = existingNotes ? `${existingNotes}\n${noteEntry}` : noteEntry;
 
@@ -351,6 +355,6 @@ export async function sendLeadEmailAndLog(
 		.select()
 		.single();
 
-	if (updateErr || !updated) throw new LeadOpError('Email sent but failed to update lead record', 500);
+	if (updateErr || !updated) throw new LeadOpError('Email drafted but failed to update lead record', 500);
 	return updated as Lead;
 }
