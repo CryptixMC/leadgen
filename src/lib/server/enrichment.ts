@@ -16,6 +16,19 @@ const DDG_SEARCH_URL = 'https://html.duckduckgo.com/html/';
 const EMAIL_RE = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
 const EMAIL_OBFUSCATED_RE = /([a-zA-Z0-9._%+-]+)\s*[\[(]?\s*at\s*[\])]?\s*([a-zA-Z0-9.-]+)\s*[\[(]?\s*dot\s*[\])]?\s*([a-zA-Z]{2,})\b/gi;
 const EMAIL_EXCLUDE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.pdf']);
+
+// Platform telemetry pixels and unedited template boilerplate that look like real emails
+// but aren't — e.g. Wix embeds a Sentry error-tracking address (random-hex local part,
+// always @sentry-next.wixpress.com) in every site's client bundle, and cheap templates
+// sometimes ship with a literal "user@domain.com" placeholder the business never replaced.
+// Confirmed on real data: these two exact patterns showed up identically across 17
+// completely unrelated leads, which is what surfaced this as a bug rather than real data.
+const PLACEHOLDER_EMAIL_DOMAINS = new Set(['wixpress.com', 'domain.com', 'example.com', 'yourdomain.com', 'email.com']);
+
+function isPlaceholderEmail(email: string): boolean {
+	const domain = email.toLowerCase().split('@')[1] ?? '';
+	return [...PLACEHOLDER_EMAIL_DOMAINS].some((d) => domain === d || domain.endsWith('.' + d));
+}
 const PHONE_RE = /\(?\d{3}\)?[\s\-\.]?\d{3}[\s\-\.]\d{4}/g;
 const COPYRIGHT_RE = /(?:©|&copy;|Copyright\s*(?:©|&copy;)?\s*)(\d{4})/gi;
 const CURRENT_YEAR = new Date().getFullYear();
@@ -260,7 +273,7 @@ function walkJsonLdContact(node: unknown, found: { email: string | null; phone: 
 	if (!found.email && typeof obj.email === 'string') {
 		const candidate = obj.email.replace(/^mailto:/i, '').trim();
 		EMAIL_RE.lastIndex = 0;
-		if (EMAIL_RE.test(candidate)) found.email = candidate;
+		if (EMAIL_RE.test(candidate) && !isPlaceholderEmail(candidate)) found.email = candidate;
 	}
 	if (!found.phone && typeof obj.telephone === 'string' && obj.telephone.replace(/\D/g, '').length >= 10) {
 		found.phone = obj.telephone.trim();
@@ -310,7 +323,7 @@ function extractContactInfo($: ReturnType<typeof cheerioLoad>): { email: string 
 		if (!email && href.startsWith('mailto:')) {
 			const candidate = href.slice(7).split('?')[0].trim();
 			EMAIL_RE.lastIndex = 0;
-			if (EMAIL_RE.test(candidate)) email = candidate;
+			if (EMAIL_RE.test(candidate) && !isPlaceholderEmail(candidate)) email = candidate;
 		}
 		if (!phone && href.startsWith('tel:')) {
 			const candidate = href.slice(4).trim();
@@ -329,7 +342,7 @@ function extractContactInfo($: ReturnType<typeof cheerioLoad>): { email: string 
 			const decoded = decodeCfEmail(encoded);
 			if (!decoded) return;
 			EMAIL_RE.lastIndex = 0;
-			if (EMAIL_RE.test(decoded)) email = decoded;
+			if (EMAIL_RE.test(decoded) && !isPlaceholderEmail(decoded)) email = decoded;
 		});
 	}
 
@@ -339,13 +352,20 @@ function extractContactInfo($: ReturnType<typeof cheerioLoad>): { email: string 
 		if (!phone && jsonLd.phone) phone = jsonLd.phone;
 	}
 
+	// Strip non-JSON-LD <script>/<style> content before scanning visible text — cheerio's
+	// $.text() otherwise includes raw JS source (tracking/analytics config, e.g. Wix embeds
+	// a Sentry error-reporting address in every site's client bundle), which can contain
+	// email-shaped strings that were never a business's real contact info. JSON-LD extraction
+	// above already ran, so it's safe to drop script content now.
+	$('script:not([type="application/ld+json"]), style').remove();
 	const text = $.text();
 	if (!email) {
 		EMAIL_RE.lastIndex = 0;
 		let match: RegExpExecArray | null;
 		while ((match = EMAIL_RE.exec(text)) !== null) {
 			const candidate = match[0];
-			if (!EMAIL_EXCLUDE_EXTS.has(candidate.toLowerCase().replace(/.*(\.[^.]+)$/, '$1'))) {
+			const ext = candidate.toLowerCase().replace(/.*(\.[^.]+)$/, '$1');
+			if (!EMAIL_EXCLUDE_EXTS.has(ext) && !isPlaceholderEmail(candidate)) {
 				email = candidate;
 				break;
 			}
@@ -355,7 +375,10 @@ function extractContactInfo($: ReturnType<typeof cheerioLoad>): { email: string 
 		// De-obfuscated fallback: "name [at] domain [dot] com" style anti-scraper text
 		EMAIL_OBFUSCATED_RE.lastIndex = 0;
 		const match = EMAIL_OBFUSCATED_RE.exec(text);
-		if (match) email = `${match[1]}@${match[2]}.${match[3]}`.toLowerCase();
+		if (match) {
+			const candidate = `${match[1]}@${match[2]}.${match[3]}`.toLowerCase();
+			if (!isPlaceholderEmail(candidate)) email = candidate;
+		}
 	}
 	if (!phone) {
 		PHONE_RE.lastIndex = 0;
@@ -517,6 +540,7 @@ async function extractContactFromSocialBio(
 
 		const html = await resp.text();
 		const $ = cheerioLoad(html);
+		$('script:not([type="application/ld+json"]), style').remove();
 
 		// Collect candidate text sources: og:description bio, mailto/tel links, page text
 		const sources: string[] = [];
@@ -542,7 +566,7 @@ async function extractContactFromSocialBio(
 				const m = EMAIL_RE.exec(src);
 				if (m) {
 					const candidate = m[0];
-					if (!EMAIL_EXCLUDE_EXTS.has(candidate.toLowerCase().replace(/.*(\.[^.]+)$/, '$1'))) {
+					if (!EMAIL_EXCLUDE_EXTS.has(candidate.toLowerCase().replace(/.*(\.[^.]+)$/, '$1')) && !isPlaceholderEmail(candidate)) {
 						email = candidate;
 					}
 				}
