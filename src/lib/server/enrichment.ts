@@ -16,7 +16,7 @@ const DDG_SEARCH_URL = 'https://html.duckduckgo.com/html/';
 const EMAIL_RE = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
 const EMAIL_OBFUSCATED_RE = /([a-zA-Z0-9._%+-]+)\s*[\[(]?\s*at\s*[\])]?\s*([a-zA-Z0-9.-]+)\s*[\[(]?\s*dot\s*[\])]?\s*([a-zA-Z]{2,})\b/gi;
 const EMAIL_EXCLUDE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.pdf']);
-const PHONE_RE = /\(?\d{3}\)?[\s\-\.]\d{3}[\s\-\.]\d{4}/g;
+const PHONE_RE = /\(?\d{3}\)?[\s\-\.]?\d{3}[\s\-\.]\d{4}/g;
 const COPYRIGHT_RE = /(?:©|&copy;|Copyright\s*(?:©|&copy;)?\s*)(\d{4})/gi;
 const CURRENT_YEAR = new Date().getFullYear();
 
@@ -319,14 +319,18 @@ function extractContactInfo($: ReturnType<typeof cheerioLoad>): { email: string 
 	});
 
 	if (!email) {
-		const encoded = $('[data-cfemail]').first().attr('data-cfemail');
-		if (encoded) {
+		// Check every obfuscated span, not just the first — a footer theme/plugin credit
+		// link can also be Cloudflare-obfuscated and appear before the real contact email
+		// in DOM order, so take the first one that actually decodes to a valid address.
+		$('[data-cfemail]').each((_, el) => {
+			if (email) return;
+			const encoded = $(el).attr('data-cfemail');
+			if (!encoded) return;
 			const decoded = decodeCfEmail(encoded);
-			if (decoded) {
-				EMAIL_RE.lastIndex = 0;
-				if (EMAIL_RE.test(decoded)) email = decoded;
-			}
-		}
+			if (!decoded) return;
+			EMAIL_RE.lastIndex = 0;
+			if (EMAIL_RE.test(decoded)) email = decoded;
+		});
 	}
 
 	if (!email || !phone) {
