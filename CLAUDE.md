@@ -144,7 +144,11 @@ mobile_friendly      boolean
 website_inferred     boolean        -- true if URL was discovered, not from GBP
 website_screenshot   text nullable  -- base64 data URI from PageSpeed final-screenshot
 email                text nullable
-email_unverified     boolean        -- true if email came from the AI web-search fallback, not a direct page fetch
+email_unverified     boolean        -- true if email came from the Google-search-results scrape fallback (no LLM), not a direct page fetch
+possible_bad_fit     boolean        -- true if leads' emails/domains/names suggest a franchise or multi-location chain
+bad_fit_reason       text nullable  -- human-readable reason set alongside possible_bad_fit
+contact_flagged      boolean        -- broader "contact may be inaccurate" flag (superset of email_unverified)
+contact_flag_reason  text nullable  -- human-readable reason set alongside contact_flagged
 site_age_estimate    text
 also_on_yelp         boolean
 yelp_url             text nullable
@@ -217,8 +221,8 @@ Score is 0–100, capped. Higher = stronger prospect. Source: `src/lib/server/sc
 | Not on Yelp (only when `has_gbp` is true) | +5 |
 
 Priority:
-- Score 60+ → `high`
-- Score 30–59 → `medium`
+- Score 45+ → `high`
+- Score 30–44 → `medium`
 - Score < 30 → `low`
 
 ---
@@ -238,26 +242,57 @@ Score recalculates after every enrichment run.
 ### Find Contact
 
 A separate, deeper pipeline (`findContact()` in `enrichment.ts`, triggered by the "Find
-Contact" button — only shown when a lead is missing email or phone) that fills gaps only
-(never overwrites an existing email/phone). Stages, in order, stopping once both fields are
-found: homepage → keyword/label-matched + catch-all same-origin subpage crawl → known social
-bios → newly-discovered social bios → Google-search fallback. Bounded by a 50s wall-clock
-deadline (not a flat per-fetch timeout) so a slow site trades away later stages instead of
-every stage being starved equally — stays under the route's `maxDuration: 60`.
+Contact" button) that normally fills gaps only (never overwrites an existing email/phone).
+Stages, in order, stopping once both fields are found: homepage → keyword/label-matched +
+catch-all same-origin subpage crawl → known social bios → newly-discovered social bios →
+Google-search fallback. Bounded by a 50s wall-clock deadline (not a flat per-fetch timeout)
+so a slow site trades away later stages instead of every stage being starved equally — stays
+under the route's `maxDuration: 60`.
+
+The button is always visible on the lead detail page. Once a lead already has both email and
+phone it relabels to "Re-check Contact" and calls the route with `?force=true`
+(`findContactForce()` client-side): this makes `findContact()` search from scratch even
+though an email is already on file, for when you suspect the current one is wrong. A forced
+re-run **never overwrites automatically** — if a different email turns up, it comes back as
+a `candidateEmail` in the response and the UI shows both side by side with an explicit
+Keep current / Use this instead choice.
 
 Email extraction (`extractContactInfo()`, shared with Quick/Deep Scan) checks, in order:
 `mailto:`/`tel:` links → Cloudflare's email-obfuscation `data-cfemail` encoding (decoded
 with the same XOR-with-first-byte algorithm Cloudflare's own JS uses) → JSON-LD structured
 data → plain-text regex → `name [at] domain [dot] com`-style de-obfuscated text.
 
-The Google-search fallback (`searchContactMentions()` in `enrichment.ts` — no AI involved)
-scans a Google results page for the business name/city, first checking the results page's
-own snippet text, then visiting a few non-social, non-data-broker results (Yellow Pages/BBB-
-style directories are deliberately not excluded — only known guessed-format data brokers
-like ZoomInfo/RocketReach are). Since this can't be verified against the business's own
-site directly, any email it supplies is marked `email_unverified = true` (surfaced in the
-UI as a warning badge) — every other source (on-site crawl, social bios, manual Edit Lead
-entry) sets it `false`.
+The Google-search fallback (`searchContactMentions()` in `enrichment.ts` — no LLM involved,
+plain HTML scrape) scans a Google results page for the business name/city, first checking
+the results page's own snippet text, then visiting a few non-social, non-data-broker results
+(Yellow Pages/BBB-style directories are deliberately not excluded — only known guessed-format
+data brokers like ZoomInfo/RocketReach are). Since this can't be verified against the
+business's own site directly, any email it supplies is marked `email_unverified = true`
+(surfaced in the UI as a warning badge) — every other source (on-site crawl, social bios,
+manual Edit Lead entry) sets it `false`. Google's CAPTCHA/"unusual traffic" interstitial
+returns HTTP 200, so `isGoogleBlocked()` checks the response for known interstitial markers
+and surfaces it as `googleBlocked` on `findContact()`'s return value, rather than letting a
+block silently masquerade as "no contact found."
+
+**Bulk find-contact** (`POST /api/leads/find-contact-bulk`) processes a capped batch (15) of
+leads currently missing email at a time, `Semaphore(5)` concurrency (lower than `rescore`'s
+20, specifically to go easier on the Google-scrape fallback stage), returning
+`{ updated, blocked, total }`. The dashboard's "Find Contact — All Missing" button loops this
+until `total` comes back 0, and stops itself early if a batch reports `blocked > 0` rather
+than continuing to hammer a rate-limited endpoint.
+
+### Bad-Fit Detection
+
+`detectBadFitLeads()` in `src/lib/server/badfit.ts` (triggered by `POST
+/api/leads/detect-bad-fit`, or the dashboard's "Detect Bad-Fit" button) cross-references every
+non-hidden lead against every other one to flag likely large-corp/multi-location businesses —
+a real, verifiable contact was found, but it's not a useful location-specific outreach target
+(e.g. a franchise's central "privacy officer" address). Three passes, in order of confidence:
+shared contact email across leads, shared website root domain, and a fuzzy business-name
+match (`diceCoefficient`, exported from `enrichment.ts`) at a distinct address. Sets
+`possible_bad_fit`/`bad_fit_reason`; re-flags from scratch each run so it stays correct as
+leads' data changes. Never auto-hides — the dashboard's "Select likely bad-fit" button feeds
+flagged leads into the existing manual Hide action.
 
 ---
 
@@ -268,17 +303,20 @@ All routes require `Authorization: Bearer <token>` except `/api/health`.
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/api/health` | Health check, no auth |
-| GET | `/api/leads` | List — filterable by `?status=` and `?priority=`, score desc |
+| GET | `/api/leads` | List — filterable by `?status=`, `?priority=`; `?include_hidden=true` includes hidden leads too, score desc |
 | POST | `/api/leads` | Create manual lead |
+| PATCH | `/api/leads` | Batch update — body: `{ "ids": [...], "hidden": bool }` |
 | DELETE | `/api/leads` | Batch delete — body: `{ "ids": [...] }` |
 | GET | `/api/leads/export` | TSV download, score-sorted |
 | POST | `/api/leads/geocode-missing` | Fill null lat/lng via Places Details API |
 | POST | `/api/leads/rescore` | Re-enrich + rescore all leads |
+| POST | `/api/leads/find-contact-bulk` | Find Contact for a capped batch (15) of leads missing email; returns `{ updated, blocked, total }` |
+| POST | `/api/leads/detect-bad-fit` | Cross-lead scan flagging likely franchise/multi-location leads |
 | GET | `/api/leads/[id]` | Single lead |
 | PATCH | `/api/leads/[id]` | Update `status`, `notes`, `hidden`, `business_name`, `address`, `phone`, `email`, `website_url`, `owner_name`, and/or the 6 social URLs |
 | DELETE | `/api/leads/[id]` | Delete lead |
 | POST | `/api/leads/[id]/enrich` | Run enrichment pipeline |
-| POST | `/api/leads/[id]/find-contact` | Deeper gap-filling scan for a missing email/phone only |
+| POST | `/api/leads/[id]/find-contact` | Deeper gap-filling scan for a missing email/phone only; `?force=true` re-checks email even if already present (never overwrites — returns `candidateEmail` instead) |
 | POST | `/api/leads/[id]/generate-email` | Generate AI email draft via Gemini |
 | POST | `/api/leads/[id]/send-email` | Send email via SMTP |
 | POST | `/api/scrapes` | Trigger Google Places scrape |
@@ -336,8 +374,11 @@ configures the Supabase MCP server for direct DB access during development.
   Phone, Email, Website URL, Owner/Contact Name, and the 6 social URLs are user-writable via
   the Edit Lead modal. Every other field is enrichment-owned.
 - `email_unverified` is set `false` whenever email comes from a direct source (on-site
-  crawl, social bio, manual Edit Lead entry) and `true` only when Find Contact's AI
-  web-search fallback supplies it — surfaced as a warning badge in the UI.
+  crawl, social bio, manual Edit Lead entry) and `true` only when Find Contact's
+  Google-search-results scrape fallback (no LLM) supplies it — surfaced as a warning badge
+  in the UI. `contact_flagged`/`contact_flag_reason` is a broader version of the same idea,
+  additionally covering leads whose contact info is shared with another lead (see
+  `detectBadFitLeads()` below) — the UI warns on either flag.
 - Social media and aggregator URLs must be filtered before saving `website_url` — use `utils.ts` helpers.
 - Scraper handles 429s with exponential backoff in `scraper.ts`.
 - Never hardcode API keys — always use `import { env } from '$env/dynamic/private'`.
