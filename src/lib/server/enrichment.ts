@@ -593,8 +593,32 @@ export async function findContact(
 		try {
 			const { response: resp, finalUrl: homeFinalUrl } = await fetchSsrfSafe(websiteUrl, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(7_000) });
 			if (resp.ok) {
-				const $ = cheerioLoad(await resp.text());
-				const homeContact = extractContactInfo($);
+				let $ = cheerioLoad(await resp.text());
+				let homeContact = extractContactInfo($);
+
+				// Some site builders (e.g. Duda) do the inverse of typical bot handling:
+				// they serve a client-rendered app shell (no contact info in raw HTML) to
+				// UAs that look like a real browser, but a fully pre-rendered static page
+				// to UAs they don't recognize — so our own "look like a browser" BOT_UA
+				// backfires specifically on these. If the primary fetch found no email,
+				// retry once with no User-Agent header at all and use that response
+				// instead if it actually has more to offer.
+				if (needEmail && !homeContact.email) {
+					try {
+						const { response: fallbackResp } = await fetchSsrfSafe(websiteUrl, { signal: withTimeout(7_000) });
+						if (fallbackResp.ok) {
+							const $fallback = cheerioLoad(await fallbackResp.text());
+							const fallbackContact = extractContactInfo($fallback);
+							if (fallbackContact.email) {
+								$ = $fallback;
+								homeContact = fallbackContact;
+							}
+						}
+					} catch {
+						// ignore — keep the primary response
+					}
+				}
+
 				if (needEmail && !email && homeContact.email) email = homeContact.email;
 				if (needPhone && !phone && homeContact.phone) phone = homeContact.phone;
 
