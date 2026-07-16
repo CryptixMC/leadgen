@@ -12,16 +12,18 @@ export const config: Config = {
 };
 
 // Capped per call (unlike rescore's unbounded Promise.all) — findContact's own
-// up-to-50s-per-lead budget means an uncapped batch would badly exceed Vercel's
+// up-to-30s-per-lead budget means an uncapped batch would badly exceed Vercel's
 // maxDuration for any realistic list length. The client loops, calling this
 // repeatedly until `total` comes back 0, mirroring the existing per-lead
 // quick/deep-scan progress-loop pattern in the dashboard.
-const BATCH_SIZE = 15;
+const BATCH_SIZE = 20;
 
 // Lower than rescore's Semaphore(20) — specifically to reduce how hard the
 // Google-search-scrape fallback stage gets hit across concurrent leads, since
-// that's the stage known to risk a CAPTCHA wall under load.
-const CONCURRENCY = 5;
+// that's the stage known to risk a CAPTCHA wall under load. Raised from an
+// initial 5 to 8 after real-run testing showed zero blocking at that
+// concurrency across several hundred leads — still well below rescore's 20.
+const CONCURRENCY = 8;
 
 export const POST: RequestHandler = async ({ locals }) => {
 	if (locals.demo) return json({ updated: 0, blocked: 0, total: 0 });

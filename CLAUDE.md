@@ -245,7 +245,7 @@ A separate, deeper pipeline (`findContact()` in `enrichment.ts`, triggered by th
 Contact" button) that normally fills gaps only (never overwrites an existing email/phone).
 Stages, in order, stopping once both fields are found: homepage → keyword/label-matched +
 catch-all same-origin subpage crawl → known social bios → newly-discovered social bios →
-Google-search fallback. Bounded by a 50s wall-clock deadline (not a flat per-fetch timeout)
+Google-search fallback. Bounded by a 30s wall-clock deadline (not a flat per-fetch timeout)
 so a slow site trades away later stages instead of every stage being starved equally — stays
 under the route's `maxDuration: 60`.
 

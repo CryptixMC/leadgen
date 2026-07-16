@@ -595,10 +595,15 @@ const CONTACT_PAGE_KEYWORDS = [
 // find-contact route. Individual fetches get a realistic timeout (matching scrapeWebsite's
 // patience); the deadline instead gates which *stages* get to run, so a slow site trades
 // away later stages rather than a too-short per-fetch timeout crippling every stage equally.
-const FIND_CONTACT_BUDGET_MS = 50_000;
-const FIND_CONTACT_MIN_STAGE_MS = 8_000;
+// Real-world testing showed successful lookups almost always resolve in under 10s regardless
+// of this ceiling — it's only the "nothing findable anywhere" leads that ever run this long,
+// so a lower budget mostly just speeds up failures rather than costing real hits. Lowered
+// from 50s to trim worst-case per-lead latency, which matters a lot for the bulk endpoint
+// sweeping the whole missing-email backlog.
+const FIND_CONTACT_BUDGET_MS = 30_000;
+const FIND_CONTACT_MIN_STAGE_MS = 6_000;
 
-const SEARCH_FALLBACK_MIN_STAGE_MS = 10_000;
+const SEARCH_FALLBACK_MIN_STAGE_MS = 8_000;
 
 export async function findContact(
 	lead: Record<string, unknown>,

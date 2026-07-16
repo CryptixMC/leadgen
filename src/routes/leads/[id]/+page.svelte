@@ -355,8 +355,8 @@
 				onclick={handleFindContact}
 				disabled={enriching || deepEnriching || findingContact}
 				title={lead.email && lead.phone
-					? 'Re-check: searches again in case the current email is wrong. Never overwrites automatically — shows what it finds for you to review (~45s)'
-					: 'Exhaustive search: subpage crawl, structured data, de-obfuscation, social discovery, and a directory/search lookup for a missing email or phone (~45s)'}
+					? 'Re-check: searches again in case the current email is wrong. Never overwrites automatically — shows what it finds for you to review (~25s)'
+					: 'Exhaustive search: subpage crawl, structured data, de-obfuscation, social discovery, and a directory/search lookup for a missing email or phone (~25s)'}
 			>
 				{findingContact ? 'Searching…' : lead.email && lead.phone ? 'Re-check Contact' : 'Find Contact'}
 			</button>
