@@ -373,7 +373,7 @@ export async function scrapeWebsite(url: string, { subpages = true } = {}): Prom
 		social_links: {} as Record<string, string>
 	};
 	try {
-		const { response: resp } = await fetchSsrfSafe(url, {
+		const { response: resp, finalUrl } = await fetchSsrfSafe(url, {
 			headers: { 'User-Agent': BOT_UA },
 			signal: withTimeout(7_000)
 		});
@@ -386,7 +386,9 @@ export async function scrapeWebsite(url: string, { subpages = true } = {}): Prom
 
 		// Email fallback: check /contact and /about sub-pages (deep mode only)
 		if (!foundEmail && subpages) {
-			const baseUrl = new URL(url).origin;
+			// Use the post-redirect origin (see findContact for why: matching
+			// against the stale pre-redirect url silently drops every subpage).
+			const baseUrl = new URL(finalUrl).origin;
 			const subPageHrefs: string[] = [];
 			$('a[href]').each((_, el) => {
 				const href = $(el).attr('href') ?? '';
