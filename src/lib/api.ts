@@ -227,7 +227,7 @@ export async function findContactForce(
 	return { lead: data, candidateEmail: null, candidateUnverified: false };
 }
 
-export async function findContactBulk(): Promise<{ updated: number; blocked: number; total: number }> {
+export async function findContactBulk(): Promise<{ updated: number; blocked: number; siteBlocked: number; total: number }> {
 	const res = await fetch(`${BASE}/leads/find-contact-bulk`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' }

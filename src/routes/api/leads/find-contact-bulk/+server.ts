@@ -26,7 +26,7 @@ const BATCH_SIZE = 20;
 const CONCURRENCY = 8;
 
 export const POST: RequestHandler = async ({ locals }) => {
-	if (locals.demo) return json({ updated: 0, blocked: 0, total: 0 });
+	if (locals.demo) return json({ updated: 0, blocked: 0, siteBlocked: 0, total: 0 });
 
 	requireAuth(locals);
 
@@ -48,6 +48,7 @@ export const POST: RequestHandler = async ({ locals }) => {
 	const now = new Date().toISOString();
 	let updated = 0;
 	let blocked = 0;
+	let siteBlocked = 0;
 
 	await Promise.all(
 		(leads ?? []).map(async (lead) => {
@@ -55,6 +56,7 @@ export const POST: RequestHandler = async ({ locals }) => {
 			try {
 				const contact = await findContact(lead as Record<string, unknown>);
 				if (contact.googleBlocked) blocked++;
+				if (contact.siteBlocked) siteBlocked++;
 
 				if (!contact.email) {
 					await db.from('leads').update({ last_updated: now }).eq('id', lead.id);
@@ -82,5 +84,5 @@ export const POST: RequestHandler = async ({ locals }) => {
 		})
 	);
 
-	return json({ updated, blocked, total: leads?.length ?? 0 });
+	return json({ updated, blocked, siteBlocked, total: leads?.length ?? 0 });
 };

@@ -262,6 +262,7 @@
 		if (!confirm('Run Find Contact against every lead currently missing an email? This can take a while and pauses automatically if Google starts blocking requests.')) return;
 		findingAll = true;
 		findAllProgress = { updated: 0, checked: 0 };
+		let siteBlockedTotal = 0;
 		findAllMsg = 'Running…';
 		try {
 			for (;;) {
@@ -270,8 +271,12 @@
 					updated: findAllProgress.updated + result.updated,
 					checked: findAllProgress.checked + result.total
 				};
+				siteBlockedTotal += result.siteBlocked;
 				if (result.total === 0) {
 					findAllMsg = `Done — found contact for ${findAllProgress.updated} of ${findAllProgress.checked} leads checked.`;
+					if (siteBlockedTotal > 0) {
+						findAllMsg += ` ${siteBlockedTotal} site(s) appeared to block automated access — worth checking those manually.`;
+					}
 					break;
 				}
 				if (result.blocked > 0) {

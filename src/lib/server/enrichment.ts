@@ -618,7 +618,13 @@ const SEARCH_FALLBACK_MIN_STAGE_MS = 8_000;
 export async function findContact(
 	lead: Record<string, unknown>,
 	opts: { forceEmail?: boolean } = {}
-): Promise<{ email: string | null; phone: string | null; emailUnverified: boolean; googleBlocked: boolean }> {
+): Promise<{
+	email: string | null;
+	phone: string | null;
+	emailUnverified: boolean;
+	googleBlocked: boolean;
+	siteBlocked: boolean;
+}> {
 	const deadline = Date.now() + FIND_CONTACT_BUDGET_MS;
 	const timeLeft = () => deadline - Date.now();
 
@@ -626,6 +632,7 @@ export async function findContact(
 	const needPhone = !lead.phone;
 	let email: string | null = null;
 	let phone: string | null = null;
+	let siteBlocked = false;
 	const satisfied = () => (!needEmail || email) && (!needPhone || phone);
 
 	const websiteUrl = lead.website_url as string | null;
@@ -633,7 +640,9 @@ export async function findContact(
 		try {
 			const { response: resp, finalUrl: homeFinalUrl } = await fetchSsrfSafe(websiteUrl, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(7_000) });
 			if (resp.ok) {
-				let $ = cheerioLoad(await resp.text());
+				const homeHtml = await resp.text();
+				if (isThirdPartyBotBlocked(homeHtml)) siteBlocked = true;
+				let $ = cheerioLoad(homeHtml);
 				let homeContact = extractContactInfo($);
 
 				// Some site builders (e.g. Duda) do the inverse of typical bot handling:
@@ -791,7 +800,7 @@ export async function findContact(
 		if (needPhone && !phone && found.phone) phone = found.phone;
 	}
 
-	return { email, phone, emailUnverified, googleBlocked };
+	return { email, phone, emailUnverified, googleBlocked, siteBlocked };
 }
 
 // Google returns HTTP 200 even for its CAPTCHA/"unusual traffic" interstitial, so a plain
@@ -805,6 +814,19 @@ function isGoogleBlocked(finalUrl: string, html: string): boolean {
 	if (/unusual traffic from your computer network/i.test(html)) return true;
 	if (!html.includes('id="search"') && !html.includes('id="rso"') && html.length < 5000) return true;
 	return false;
+}
+
+// Some hosting providers front their customers' sites with a bot-protection layer that
+// returns a real HTTP 200/202 but with a tiny body containing only a meta-refresh to a
+// challenge page (e.g. a shared "sgcaptcha" system seen across multiple unrelated small
+// business sites during real-world testing — confirmed the same ~180-byte stub, same
+// meta-refresh-to-/.well-known/ path, on three different domains). A page this size can
+// never legitimately contain a real business's contact info, so treat it as "we got
+// blocked" rather than "genuinely nothing published" — the two have very different meaning
+// for how confidently the caller should treat an empty result.
+function isThirdPartyBotBlocked(html: string): boolean {
+	if (html.length > 1000) return false;
+	return /<meta\s+http-equiv=["']refresh["']/i.test(html) && /captcha|challenge|\.well-known/i.test(html);
 }
 
 async function discoverWebsiteGoogle(
