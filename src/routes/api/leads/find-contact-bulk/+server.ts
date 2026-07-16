@@ -30,12 +30,17 @@ export const POST: RequestHandler = async ({ locals }) => {
 
 	requireAuth(locals);
 
+	// Order by least-recently-touched first, and stamp last_updated on every lead this
+	// batch processes below (success or fail) — without this, a cluster of genuinely
+	// unfindable leads gets re-selected by every subsequent call forever, since a failed
+	// attempt otherwise leaves no trace and the query has no way to move past them.
 	const { data: leads, error: err } = await db
 		.from('leads')
 		.select('*')
 		.is('email', null)
 		.eq('hidden', false)
 		.eq('possible_bad_fit', false)
+		.order('last_updated', { ascending: true, nullsFirst: true })
 		.limit(BATCH_SIZE);
 	if (err) throw error(500, err.message);
 
@@ -50,7 +55,11 @@ export const POST: RequestHandler = async ({ locals }) => {
 			try {
 				const contact = await findContact(lead as Record<string, unknown>);
 				if (contact.googleBlocked) blocked++;
-				if (!contact.email) return;
+
+				if (!contact.email) {
+					await db.from('leads').update({ last_updated: now }).eq('id', lead.id);
+					return;
+				}
 
 				const updates: Record<string, unknown> = {
 					email: contact.email,
