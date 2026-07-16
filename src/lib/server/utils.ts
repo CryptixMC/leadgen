@@ -193,7 +193,13 @@ export async function assertPublicHttpUrl(rawUrl: string): Promise<void> {
 
 	let addresses: { address: string }[];
 	try {
-		addresses = await lookup(hostname, { all: true });
+		// Bounded defensively — an unresponsive/misconfigured authoritative DNS server
+		// otherwise hangs this indefinitely, with no per-fetch AbortSignal to save it
+		// since this check runs before the fetch itself.
+		addresses = await Promise.race([
+			lookup(hostname, { all: true }),
+			new Promise<never>((_, reject) => setTimeout(() => reject(new Error('DNS lookup timed out')), 5_000))
+		]);
 	} catch {
 		throw new Error('URL host could not be resolved');
 	}

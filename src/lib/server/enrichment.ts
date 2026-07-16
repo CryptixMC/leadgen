@@ -14,7 +14,17 @@ const YELP_SEARCH_URL = 'https://api.yelp.com/v3/businesses/search';
 const DDG_SEARCH_URL = 'https://html.duckduckgo.com/html/';
 
 const EMAIL_RE = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g;
-const EMAIL_OBFUSCATED_RE = /([a-zA-Z0-9._%+-]+)\s*[\[(]?\s*at\s*[\])]?\s*([a-zA-Z0-9.-]+)\s*[\[(]?\s*dot\s*[\])]?\s*([a-zA-Z]{2,})\b/gi;
+// Adjacent independently-optional \s*/[\[(]? groups here used to cause catastrophic
+// backtracking on ordinary long pages with no actual obfuscated email present (confirmed:
+// 1.7s+ for a single .exec() on a 67KB real page, and it froze the whole dev server's event
+// loop during a bulk run). Each "at"/"dot" marker is now a flat alternation of fully-formed
+// variants instead, which removes the ambiguous empty-match partitioning that caused it.
+const AT_MARKER = '(?:\\s+at\\s+|\\s*\\[at\\]\\s*|\\s*\\(at\\)\\s*)';
+const DOT_MARKER = '(?:\\s+dot\\s+|\\s*\\[dot\\]\\s*|\\s*\\(dot\\)\\s*)';
+const EMAIL_OBFUSCATED_RE = new RegExp(
+	`([a-zA-Z0-9._%+-]+)${AT_MARKER}([a-zA-Z0-9.-]+)${DOT_MARKER}([a-zA-Z]{2,})\\b`,
+	'gi'
+);
 const EMAIL_EXCLUDE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.pdf']);
 
 // Platform telemetry pixels and unedited template boilerplate that look like real emails
