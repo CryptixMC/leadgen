@@ -29,6 +29,10 @@ export interface Lead {
 	youtube_url: string | null;
 	email: string | null;
 	email_unverified: boolean;
+	possible_bad_fit: boolean;
+	bad_fit_reason: string | null;
+	contact_flagged: boolean;
+	contact_flag_reason: string | null;
 	website_inferred: boolean | null;
 	website_source: string | null;
 	website_screenshot: string | null;
@@ -71,12 +75,13 @@ export interface Client {
 }
 
 export async function fetchLeads(
-	params: { status?: string; priority?: string } = {},
+	params: { status?: string; priority?: string; includeHidden?: boolean } = {},
 	fetchFn: typeof fetch = fetch
 ): Promise<Lead[]> {
 	const url = new URL(`${BASE}/leads`, 'http://localhost');
 	if (params.status) url.searchParams.set('status', params.status);
 	if (params.priority) url.searchParams.set('priority', params.priority);
+	if (params.includeHidden) url.searchParams.set('include_hidden', 'true');
 	const res = await fetchFn(url.pathname + url.search);
 	if (!res.ok) throw new Error(`Failed to fetch leads: ${res.statusText}`);
 	return res.json();
@@ -191,6 +196,25 @@ export async function findContact(id: string): Promise<Lead> {
 	});
 	if (!res.ok) throw new Error(`Find contact failed: ${res.statusText}`);
 	return res.json();
+}
+
+/**
+ * Forces findContact to look for an email even when the lead already has one —
+ * for when you suspect the current email is wrong. Never overwrites: if a
+ * different email turns up, it comes back as `candidateEmail` for you to review
+ * and apply yourself (e.g. via updateLead), rather than being saved automatically.
+ */
+export async function findContactForce(
+	id: string
+): Promise<{ lead: Lead; candidateEmail: string | null; candidateUnverified: boolean }> {
+	const res = await fetch(`${BASE}/leads/${id}/find-contact?force=true`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' }
+	});
+	if (!res.ok) throw new Error(`Find contact failed: ${res.statusText}`);
+	const data = await res.json();
+	if ('candidateEmail' in data) return data;
+	return { lead: data, candidateEmail: null, candidateUnverified: false };
 }
 
 export async function batchDeleteLeads(ids: string[]): Promise<{ deleted: number }> {

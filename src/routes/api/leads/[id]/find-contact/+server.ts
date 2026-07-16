@@ -10,7 +10,7 @@ export const config: Config = {
 	maxDuration: 60
 };
 
-export const POST: RequestHandler = async ({ locals, params }) => {
+export const POST: RequestHandler = async ({ locals, params, url }) => {
 	if (locals.demo) return json({ ok: true });
 
 	requireAuth(locals);
@@ -21,12 +21,21 @@ export const POST: RequestHandler = async ({ locals, params }) => {
 		.single();
 	if (err || !lead) throw error(404, 'Lead not found');
 
+	const force = url.searchParams.get('force') === 'true';
+
 	let contact: { email: string | null; phone: string | null; emailUnverified: boolean };
 	try {
-		contact = await findContact(lead as Record<string, unknown>);
+		contact = await findContact(lead as Record<string, unknown>, { forceEmail: force });
 	} catch (e) {
 		console.error('findContact failed:', e);
 		throw error(500, 'Find contact timed out or failed');
+	}
+
+	// Forced re-run on a lead that already has an email: never silently overwrite —
+	// the user asked for this specifically because they suspect the current email is
+	// wrong, so surface the candidate and let them choose rather than guessing for them.
+	if (force && contact.email && lead.email && contact.email !== lead.email) {
+		return json({ lead, candidateEmail: contact.email, candidateUnverified: contact.emailUnverified });
 	}
 
 	const updates: Record<string, unknown> = {};

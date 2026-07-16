@@ -2,7 +2,7 @@
 	import { untrack } from 'svelte';
 	import { enhance } from '$app/forms';
 	import type { PageData } from './$types';
-	import { updateLead, deleteLead, enrichLead, findContact, generateEmail, sendLeadEmail, type Lead } from '$lib/api';
+	import { updateLead, deleteLead, enrichLead, findContact, findContactForce, generateEmail, sendLeadEmail, type Lead } from '$lib/api';
 	import { EMAIL_TEMPLATES, fillTemplate, type EmailTemplate } from '$lib/emailTemplates';
 	import { goto } from '$app/navigation';
 
@@ -123,6 +123,8 @@
 
 	let deepEnriching = $state(false);
 	let findingContact = $state(false);
+	let candidateEmail = $state<string | null>(null);
+	let candidateUnverified = $state(false);
 
 	async function handleEnrich() {
 		enriching = true;
@@ -155,22 +157,54 @@
 	async function handleFindContact() {
 		findingContact = true;
 		enrichMsg = '';
+		candidateEmail = null;
 		try {
 			const hadEmail = Boolean(lead.email);
 			const hadPhone = Boolean(lead.phone);
-			lead = await findContact(lead.id);
-			const foundNew = (lead.email && !hadEmail) || (lead.phone && !hadPhone);
-			enrichMsg = foundNew
-				? lead.email_unverified
-					? 'Contact found (email unverified — please double-check)!'
-					: 'Contact found!'
-				: 'No new contact info found.';
+			if (hadEmail && hadPhone) {
+				// Already has both — this is a forced re-check (the user suspects the
+				// current email is wrong). Never auto-overwrite: surface a candidate
+				// for review instead of saving it.
+				const result = await findContactForce(lead.id);
+				lead = result.lead;
+				if (result.candidateEmail) {
+					candidateEmail = result.candidateEmail;
+					candidateUnverified = result.candidateUnverified;
+					enrichMsg = '';
+				} else {
+					enrichMsg = 'No different contact info found.';
+				}
+			} else {
+				lead = await findContact(lead.id);
+				const foundNew = (lead.email && !hadEmail) || (lead.phone && !hadPhone);
+				enrichMsg = foundNew
+					? lead.email_unverified
+						? 'Contact found (email unverified — please double-check)!'
+						: 'Contact found!'
+					: 'No new contact info found.';
+			}
 		} catch {
 			enrichMsg = 'Contact search failed.';
 		} finally {
 			findingContact = false;
 		}
+		if (!candidateEmail) setTimeout(() => (enrichMsg = ''), 3000);
+	}
+
+	async function applyCandidateEmail() {
+		if (!candidateEmail) return;
+		try {
+			lead = await updateLead(lead.id, { email: candidateEmail });
+			enrichMsg = 'Email updated!';
+		} catch {
+			enrichMsg = 'Failed to update email.';
+		}
+		candidateEmail = null;
 		setTimeout(() => (enrichMsg = ''), 3000);
+	}
+
+	function dismissCandidateEmail() {
+		candidateEmail = null;
 	}
 
 	async function handleDelete() {
@@ -316,11 +350,16 @@
 			<button class="enrich-btn deep-btn" onclick={handleDeepEnrich} disabled={enriching || deepEnriching || findingContact} title="Deep scan: everything + PageSpeed score + screenshot (~60s)">
 				{deepEnriching ? 'Deep scanning…' : 'Deep Scan'}
 			</button>
-			{#if !lead.email || !lead.phone}
-				<button class="enrich-btn deep-btn" onclick={handleFindContact} disabled={enriching || deepEnriching || findingContact} title="Exhaustive search: subpage crawl, structured data, de-obfuscation, social discovery, and a directory/search lookup for a missing email or phone (~45s)">
-					{findingContact ? 'Searching…' : 'Find Contact'}
-				</button>
-			{/if}
+			<button
+				class="enrich-btn deep-btn"
+				onclick={handleFindContact}
+				disabled={enriching || deepEnriching || findingContact}
+				title={lead.email && lead.phone
+					? 'Re-check: searches again in case the current email is wrong. Never overwrites automatically — shows what it finds for you to review (~45s)'
+					: 'Exhaustive search: subpage crawl, structured data, de-obfuscation, social discovery, and a directory/search lookup for a missing email or phone (~45s)'}
+			>
+				{findingContact ? 'Searching…' : lead.email && lead.phone ? 'Re-check Contact' : 'Find Contact'}
+			</button>
 			{#if lead.email}
 				<button class="email-btn" onclick={openEmailModal}>Send Email</button>
 			{/if}
@@ -335,6 +374,20 @@
 			</button>
 		</div>
 	</div>
+
+	{#if candidateEmail}
+		<div class="candidate-box">
+			<span>
+				Found a different email: <strong>{candidateEmail}</strong>
+				{#if candidateUnverified}<span class="inferred-warn">⚠️ Found via directory/search lookup — please verify</span>{/if}
+				— currently saved: <strong>{lead.email}</strong>
+			</span>
+			<div class="candidate-actions">
+				<button class="email-btn" onclick={applyCandidateEmail}>Use this instead</button>
+				<button class="back-btn" onclick={dismissCandidateEmail}>Keep current</button>
+			</div>
+		</div>
+	{/if}
 
 	<div class="lead-header">
 		<div>
@@ -1145,6 +1198,25 @@
 		border: 1px solid rgba(251, 191, 36, 0.25);
 		border-radius: var(--radius-sm);
 		padding: 0.2rem 0.5rem;
+	}
+
+	.candidate-box {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 1rem;
+		margin-bottom: 1rem;
+		padding: 0.75rem 1rem;
+		font-size: 0.85rem;
+		background: rgba(251, 191, 36, 0.08);
+		border: 1px solid rgba(251, 191, 36, 0.25);
+		border-radius: var(--radius-sm);
+	}
+
+	.candidate-actions {
+		display: flex;
+		gap: 0.5rem;
+		flex-shrink: 0;
 	}
 
 	.linkedin-link {

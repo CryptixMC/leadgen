@@ -577,12 +577,13 @@ const FIND_CONTACT_MIN_STAGE_MS = 8_000;
 const SEARCH_FALLBACK_MIN_STAGE_MS = 10_000;
 
 export async function findContact(
-	lead: Record<string, unknown>
+	lead: Record<string, unknown>,
+	opts: { forceEmail?: boolean } = {}
 ): Promise<{ email: string | null; phone: string | null; emailUnverified: boolean }> {
 	const deadline = Date.now() + FIND_CONTACT_BUDGET_MS;
 	const timeLeft = () => deadline - Date.now();
 
-	const needEmail = !lead.email;
+	const needEmail = opts.forceEmail || !lead.email;
 	const needPhone = !lead.phone;
 	let email: string | null = null;
 	let phone: string | null = null;
