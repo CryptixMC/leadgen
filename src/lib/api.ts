@@ -113,6 +113,16 @@ export async function batchHideLeads(ids: string[]): Promise<{ hidden: number }>
 	return res.json();
 }
 
+export async function batchUnhideLeads(ids: string[]): Promise<{ hidden: number }> {
+	const res = await fetch(`${BASE}/leads`, {
+		method: 'PATCH',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ids, hidden: false })
+	});
+	if (!res.ok) throw new Error(`Failed to batch unhide leads: ${res.statusText}`);
+	return res.json();
+}
+
 export async function updateLead(
 	id: string,
 	data: {

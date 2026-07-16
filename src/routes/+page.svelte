@@ -2,13 +2,14 @@
 	import { invalidateAll } from '$app/navigation';
 	import type { PageData } from './$types';
 	import type { Lead } from '$lib/api';
-	import { batchDeleteLeads, batchHideLeads, createLead, enrichLead, findContactBulk } from '$lib/api';
+	import { batchDeleteLeads, batchHideLeads, batchUnhideLeads, createLead, enrichLead, findContactBulk } from '$lib/api';
 
 	let { data }: { data: PageData } = $props();
 
 	let statusFilter = $state('');
 	let priorityFilter = $state('');
 	let categoryFilter = $state('');
+	let visibilityFilter = $state<'active' | 'hidden' | 'all'>('active');
 	let searchQuery = $state('');
 
 	type SortColumn =
@@ -155,6 +156,9 @@
 
 	const filtered = $derived(
 		(data.leads as Lead[])
+			.filter((l) =>
+				visibilityFilter === 'all' ? true : visibilityFilter === 'hidden' ? l.hidden : !l.hidden
+			)
 			.filter((l) => (statusFilter ? l.status === statusFilter : true))
 			.filter((l) => (priorityFilter ? l.priority === priorityFilter : true))
 			.filter((l) => (categoryFilter ? l.category === categoryFilter : true))
@@ -288,6 +292,20 @@
 		}
 	}
 
+	async function unhideSelected() {
+		if (selected.size === 0) return;
+		hiding = true;
+		try {
+			await batchUnhideLeads([...selected]);
+			selected = new Set();
+			await invalidateAll();
+		} catch (err) {
+			alert(err instanceof Error ? err.message : 'Unhide failed');
+		} finally {
+			hiding = false;
+		}
+	}
+
 	async function deleteSelected() {
 		if (selected.size === 0) return;
 		if (!confirm(`Delete ${selected.size} lead${selected.size === 1 ? '' : 's'}? This cannot be undone.`)) return;
@@ -368,6 +386,14 @@
 					{/each}
 				</select>
 			</label>
+			<label>
+				<span>Visibility</span>
+				<select bind:value={visibilityFilter}>
+					<option value="active">Active</option>
+					<option value="hidden">Hidden only</option>
+					<option value="all">All</option>
+				</select>
+			</label>
 		</div>
 		<div class="right-controls">
 			{#if selected.size > 0}
@@ -384,6 +410,11 @@
 				<button class="hide-btn" onclick={hideSelected} disabled={hiding || deleting || enriching}>
 					{hiding ? 'Hiding…' : `Hide ${selected.size} selected`}
 				</button>
+				{#if visibilityFilter !== 'active'}
+					<button class="hide-btn" onclick={unhideSelected} disabled={hiding || deleting || enriching}>
+						{hiding ? 'Unhiding…' : `Unhide ${selected.size} selected`}
+					</button>
+				{/if}
 				<button class="delete-btn" onclick={deleteSelected} disabled={deleting || enriching || hiding}>
 					{deleting ? 'Deleting…' : `Delete ${selected.size} selected`}
 				</button>
