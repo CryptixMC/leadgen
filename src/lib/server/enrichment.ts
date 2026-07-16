@@ -591,7 +591,7 @@ export async function findContact(
 	const websiteUrl = lead.website_url as string | null;
 	if (websiteUrl && !satisfied() && timeLeft() > FIND_CONTACT_MIN_STAGE_MS) {
 		try {
-			const { response: resp } = await fetchSsrfSafe(websiteUrl, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(7_000) });
+			const { response: resp, finalUrl: homeFinalUrl } = await fetchSsrfSafe(websiteUrl, { headers: { 'User-Agent': BOT_UA }, signal: withTimeout(7_000) });
 			if (resp.ok) {
 				const $ = cheerioLoad(await resp.text());
 				const homeContact = extractContactInfo($);
@@ -599,9 +599,20 @@ export async function findContact(
 				if (needPhone && !phone && homeContact.phone) phone = homeContact.phone;
 
 				if (!satisfied() && timeLeft() > FIND_CONTACT_MIN_STAGE_MS) {
-					const baseUrl = new URL(websiteUrl).origin;
+					// Same-origin check must use the *post-redirect* origin — sites
+					// commonly redirect http->https and/or www->apex, and the stored
+					// website_url is whatever was captured at scrape time. Matching
+					// against the stale pre-redirect origin makes every link on the
+					// (already-redirected) page fail the same-origin check, silently
+					// skipping the entire subpage crawl.
+					const baseUrl = new URL(homeFinalUrl).origin;
 					const allLinkUrls: string[] = [];
 					const subPageUrls: string[] = [];
+					// Rank by keyword specificity (index into CONTACT_PAGE_KEYWORDS), not DOM
+					// order — a broad keyword like "location" matches every page of a
+					// franchise's location directory, and DOM order alone let dozens of
+					// those crowd the real /contact/ page out of the slice(0, 15) below.
+					const subPagePriority = new Map<string, number>();
 
 					// Match on the link's URL *or* its visible label — nav items are
 					// sometimes mislabeled (e.g. an "About" menu entry repointed at a
