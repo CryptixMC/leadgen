@@ -49,8 +49,6 @@
 		</a>
 		<div class="nav-links">
 			<a href="/" aria-current={$page.url.pathname === '/' ? 'page' : undefined}>Leads</a>
-			<a href="/pipeline" aria-current={$page.url.pathname === '/pipeline' ? 'page' : undefined}>Pipeline</a>
-			<a href="/map" aria-current={$page.url.pathname === '/map' ? 'page' : undefined}>Map</a>
 			<a href="/scraper" aria-current={$page.url.pathname === '/scraper' ? 'page' : undefined}>Scraper</a>
 			<a href="/clients" aria-current={$page.url.pathname === '/clients' ? 'page' : undefined}>Clients</a>
 			<a href="/analytics" aria-current={$page.url.pathname === '/analytics' ? 'page' : undefined}>Analytics</a>
@@ -75,8 +73,6 @@
 	{#if menuOpen}
 		<div class="mobile-menu" role="navigation" aria-label="Mobile navigation">
 			<a href="/" onclick={closeMenu} aria-current={$page.url.pathname === '/' ? 'page' : undefined}>Leads</a>
-			<a href="/pipeline" onclick={closeMenu} aria-current={$page.url.pathname === '/pipeline' ? 'page' : undefined}>Pipeline</a>
-			<a href="/map" onclick={closeMenu} aria-current={$page.url.pathname === '/map' ? 'page' : undefined}>Map</a>
 			<a href="/scraper" onclick={closeMenu} aria-current={$page.url.pathname === '/scraper' ? 'page' : undefined}>Scraper</a>
 			<a href="/clients" onclick={closeMenu} aria-current={$page.url.pathname === '/clients' ? 'page' : undefined}>Clients</a>
 			<a href="/analytics" onclick={closeMenu} aria-current={$page.url.pathname === '/analytics' ? 'page' : undefined}>Analytics</a>

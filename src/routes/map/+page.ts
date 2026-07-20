@@ -1,7 +1,6 @@
+import { redirect } from '@sveltejs/kit';
 import type { PageLoad } from './$types';
-import { fetchLeads } from '$lib/api';
 
-export const load: PageLoad = async ({ fetch }) => {
-	const leads = await fetchLeads({}, fetch);
-	return { leads };
+export const load: PageLoad = async () => {
+	throw redirect(307, '/?view=map');
 };
